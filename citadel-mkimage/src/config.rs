@@ -62,7 +62,7 @@ impl BuildConfig {
         };
         let src = Path::new(&self.source);
         if !src.is_file() {
-            bail!("Source path '{}' does not exist or is not a regular file");
+            bail!("Source path '{}' does not exist or is not a regular file", src.display());
         }
         if self.image_type == "modules" && self.kernel_version.is_none() {
             bail!("Cannot build 'modules' image without kernel-version field");
