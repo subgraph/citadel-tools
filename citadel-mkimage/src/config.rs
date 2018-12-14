@@ -3,8 +3,10 @@ use std::path::{Path,PathBuf};
 use std::fs::File;
 use std::io::Read;
 
-use Result;
 use toml;
+
+use libcitadel::Result;
+
 
 #[derive(Deserialize)]
 pub struct BuildConfig {

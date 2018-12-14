@@ -5,8 +5,8 @@ use std::fs::{self,File};
 use std::io::{self,Write};
 
 use failure::ResultExt;
+use libcitadel::Result;
 
-use Result;
 use BuildConfig;
 use util;
 

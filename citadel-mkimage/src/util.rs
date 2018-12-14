@@ -1,11 +1,9 @@
-
 use std::process::{Command,Stdio};
 use std::path::Path;
 use std::collections::HashMap;
 
 use failure::ResultExt;
-
-use Result;
+use libcitadel::Result;
 
 
 pub fn sha256<P: AsRef<Path>>(path: P) -> Result<String> {
