@@ -358,9 +358,7 @@ Boot=true
 $NETWORK_CONFIG
 
 [Files]
-BindReadOnly=/usr/share/themes
-BindReadOnly=/usr/share/icons/Paper
-
+BindReadOnly=/opt/share
 BindReadOnly=/storage/citadel-state/resolv.conf:/etc/resolv.conf
 
 $EXTRA_BIND_MOUNTS
