@@ -1,17 +1,16 @@
 use std::path::PathBuf;
 use std::fs::OpenOptions;
-use std::path::Path;
 use std::fs::{self,File};
 use std::io::{self,Write};
 
 use failure::ResultExt;
-use libcitadel::Result;
+use libcitadel::{Result,ImageHeader,util,verity};
 
 use BuildConfig;
-use util;
 
 pub struct UpdateBuilder {
     config: BuildConfig,
+    target: PathBuf,
 
     nblocks: Option<usize>,
     shasum: Option<String>,
@@ -28,18 +27,24 @@ fn align(sz: usize, n: usize) -> usize {
 
 impl UpdateBuilder {
 
-    pub fn new(config: BuildConfig) -> Result<UpdateBuilder> {
-        let builder = UpdateBuilder {
-            config,
+    pub fn new(config: BuildConfig) -> UpdateBuilder {
+        let filename = UpdateBuilder::target_filename(&config);
+        let target = config.workdir_path(&filename);
+        UpdateBuilder {
+            config, target,
             nblocks: None, shasum: None, verity_salt: None,
             verity_root: None,
-        };
+        }
+    }
 
-        builder.copy_source_image()?;
-        Ok(builder)
+    fn target_filename(config: &BuildConfig) -> String {
+        format!("citadel-{}-{}-{:03}", config.img_name(), config.channel(), config.version())
     }
 
     pub fn build(&mut self) -> Result<()> {
+        info!("Copying source file to {}", self.target.display());
+        fs::copy(self.config.source(), &self.target)?;
+
         self.pad_image()
             .context("failed writing padding to image")?;
         
@@ -55,27 +60,12 @@ impl UpdateBuilder {
         Ok(())
     }
 
-    fn target(&self, ext: Option<&str>) -> PathBuf {
-        match ext {
-            Some(s) => self.config.workdir_path(&format!("citadel-{}-{}-{:03}.{}", self.config.img_name(), self.config.channel(), self.config.version(), s)),
-            None => self.config.workdir_path(&format!("citadel-{}-{}-{:03}", self.config.img_name(), self.config.channel(), self.config.version()))
-        }
-    }
-
-    fn copy_source_image(&self) -> Result<()> {
-        sanity_check_source(self.config.source())?;
-        let target = self.target(None);
-        info!("Copying source file to {}", target.display());
-        let mut from = File::open(self.config.source())?;
-        let mut to = File::create(&target)?;
-        io::copy(&mut from, &mut to)?;
-        Ok(())
-    }
-
     fn pad_image(&mut self) -> Result<()> {
-        let target = self.target(None);
-        let meta = target.metadata()?;
+        let meta = self.target.metadata()?;
         let len = meta.len() as usize;
+        if len % 512 != 0 {
+            bail!("Image file size is not a multiple of sector size (512 bytes)");
+        }
         let padlen = align(len, BLOCK_SIZE) - len;
 
         if padlen > 0 {
@@ -83,7 +73,7 @@ impl UpdateBuilder {
             let zeros = vec![0u8; padlen];
             let mut file = OpenOptions::new()
                 .append(true)
-                .open(&target)?;
+                .open(&self.target)?;
             file.write_all(&zeros)?;
         }
 
@@ -95,7 +85,7 @@ impl UpdateBuilder {
     }
 
     fn calculate_shasum(&mut self) -> Result<()> {
-        let shasum = util::sha256(self.target(None))?;
+        let shasum = util::sha256(&self.target)?;
         info!("Sha256 of image data is {}", shasum);
         self.shasum = Some(shasum);
         Ok(())
@@ -105,7 +95,7 @@ impl UpdateBuilder {
         let hashfile = self.config.workdir_path(&format!("verity-hash-{}-{:03}", self.config.image_type(), self.config.version()));
         let outfile = self.config.workdir_path("verity-format.out");
 
-        let verity = util::verity_initial_hashtree(self.target(None), &hashfile)?;
+        let verity = verity::generate_initial_hashtree(&self.target, &hashfile)?;
 
 
         fs::write(outfile, verity.output())
@@ -132,59 +122,33 @@ impl UpdateBuilder {
 
     fn compress_image(&self) -> Result<()> {
         info!("Compressing image data");
-        util::xz_compress(self.target(None))
+        util::xz_compress(&self.target)
     }
 
     fn write_final_image(&self) -> Result<()> {
         let header = self.generate_header()?;
-        let mut path = self.target(None);
-        let fname = path.file_name().unwrap().to_str().unwrap().to_owned();
-        path.set_file_name(fname + ".img");
+        let filename = format!("{}.img", UpdateBuilder::target_filename(&self.config));
+        let mut image_path = self.config.workdir_path(&filename);
 
-        let mut out = File::create(&path)
-            .context(format!("could not open output file {}", path.display()))?;
+        let mut out = File::create(&image_path)
+            .context(format!("could not open output file {}", image_path.display()))?;
 
-        out.write_all(&header)?;
+        header.write_header(&out)?;
 
-        path.set_extension("xz");
-        let mut data = File::open(&path)
-            .context(format!("could not open compressed image data file {}", path.display()))?;
+        image_path.set_extension("xz");
+        let mut data = File::open(&image_path)
+            .context(format!("could not open compressed image data file {}", image_path.display()))?;
         io::copy(&mut data, &mut out)
             .context("error copying image data to output file")?;
         Ok(())
     }
 
-
-    ///
-    /// The Image Header structure is stored in a 4096 byte block at the start of
-    /// every resource image file. When an image is installed to a partition it
-    /// is stored at the last 4096 byte block of the block device for the partition.
-    ///
-    /// The layout of this structure is the following:
-    ///
-    ///    field     size (bytes)        offset
-    ///    -----     ------------        ------
-    ///
-    ///    magic        4                  0
-    ///    status       1                  4
-    ///    flags        1                  5
-    ///    length       2                  6
-    ///
-    ///    metainfo  <length>              8
-    ///
-    ///    signature    64              8 + length
-    ///
-    fn generate_header(&self) -> Result<Vec<u8>> {
-        let mut hdr = vec![0u8; BLOCK_SIZE];
-        hdr[0..4].copy_from_slice(b"SGOS");
-        hdr[5] = 0x04; // FLAG_DATA_COMPRESSED
+    fn generate_header(&self) -> Result<ImageHeader> {
+        let hdr = ImageHeader::new();
+        hdr.set_flag(ImageHeader::FLAG_DATA_COMPRESSED);
 
         let metainfo = self.generate_metainfo();
-        let metalen = metainfo.len();
-        hdr[6] = (metalen >> 8) as u8;
-        hdr[7] = metalen as u8;
-        hdr[8..8+metalen].copy_from_slice(&metainfo);
-
+        hdr.set_metainfo_bytes(&metainfo);
         Ok(hdr)
     }
 
@@ -207,21 +171,4 @@ impl UpdateBuilder {
         writeln!(v, "verity-root = \"{}\"", self.verity_root.as_ref().unwrap())?;
         Ok(v)
     }
-}
-
-fn sanity_check_source<P: AsRef<Path>>(src: P) -> Result<()> {
-    let src: &Path = src.as_ref();
-    let meta = match src.metadata() {
-        Ok(md) => md,
-        Err(e) => bail!("Could not load image file {}: {}", src.display(), e),
-    };
-
-    if !meta.file_type().is_file() {
-        bail!("Image file {} exists but is not a regular file", src.display());
-    }
-
-    if meta.len() % 512 != 0 {
-        bail!("Image file size is not a multiple of sector size (512 bytes)");
-    }
-    Ok(())
 }

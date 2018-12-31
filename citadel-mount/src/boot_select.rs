@@ -6,24 +6,24 @@ pub struct BootSelection {
 }
 
 impl BootSelection {
-    pub fn choose_install_partition(config: &Config) -> Result<Partition> {
-        let bs = BootSelection::load_partitions(config)?;
+    pub fn choose_install_partition() -> Result<Partition> {
+        let bs = BootSelection::load_partitions()?;
         match bs._choose_install_partition() {
             Some(p) => Ok(p.clone()),
             None => bail!("no partition found for installation"),
         }
     }
 
-    pub fn choose_boot_partition(config: &Config) -> Result<Partition> {
-        let bs = BootSelection::load_partitions(config)?;
+    pub fn choose_boot_partition() -> Result<Partition> {
+        let bs = BootSelection::load_partitions()?;
         match bs._choose_boot_partition() {
             Some(p) => Ok(p.clone()),
             None => bail!("no partition found to boot from"),
         }
     }
 
-    fn load_partitions(config: &Config) -> Result<BootSelection> {
-        let partitions = Partition::rootfs_partitions(config)
+    fn load_partitions() -> Result<BootSelection> {
+        let partitions = Partition::rootfs_partitions()
             .map_err(|e| format_err!("Could not load rootfs partition info: {}", e))?;
 
         Ok(BootSelection {

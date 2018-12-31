@@ -1,12 +1,12 @@
 use std::path::{Path,PathBuf};
 use std::collections::HashMap;
+use std::fs;
 
-use ed25519_dalek::{Signature,PublicKey,Keypair};
 use rustc_serialize::hex::FromHex;
-use sha2::Sha512;
 use toml;
 
-use {Result,PathExt};
+use Result;
+use keys::{KeyPair,PublicKey,Signature};
 
 
 const DEFAULT_CONFIG_PATH: &str = "/usr/share/citadel/citadel-image.conf";
@@ -38,7 +38,7 @@ impl Config {
     }
 
     fn from_path(path: &Path) -> Result<Config> {
-        let s = path.read_as_string()?;
+        let s = fs::read_to_string(path)?;
         let mut config = toml::from_str::<Config>(&s)?;
         for (k,v) in config.channel.iter_mut() {
             v.name = k.to_string();
@@ -107,19 +107,19 @@ impl Channel {
 
     pub fn sign(&self, data: &[u8]) -> Result<Signature> {
         let keybytes = match self.keypair {
-            Some(ref hex) => hex.from_hex()?,
+            Some(ref hex) => hex,
             None => bail!("No private signing key available for channel {}", self.name),
         };
-        let privkey = Keypair::from_bytes(&keybytes)?;
-        let sig = privkey.sign::<Sha512>(data);
+        
+        let privkey = KeyPair::from_hex(keybytes)?;
+        let sig = privkey.sign(data)?;
         Ok(sig)
     }
 
     pub fn verify(&self, data: &[u8], sigbytes: &[u8]) -> Result<()> {
         let keybytes = self.pubkey.from_hex()?;
         let pubkey = PublicKey::from_bytes(&keybytes)?;
-        let sig = Signature::from_bytes(sigbytes)?;
-        pubkey.verify::<Sha512>(data, &sig)?;
+        pubkey.verify(data, sigbytes)?;
         Ok(())
     }
 

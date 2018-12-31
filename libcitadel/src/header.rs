@@ -1,14 +1,14 @@
 use std::cell::RefCell;
-use std::path::Path;
 use std::fs::File;
-use std::io::{Write,Read};
+use std::io::{Read, Write};
+use std::path::Path;
 
 use failure::ResultExt;
 
 use toml;
 
-use {Channel,Config,Result,BlockDev};
 use blockdev::AlignedBuffer;
+use {BlockDev, Channel, Config, Result};
 
 /// Expected magic value in header
 const MAGIC: &[u8] = b"SGOS";
@@ -19,7 +19,7 @@ const METAINFO_OFFSET: usize = 8;
 /// Signature is 64 bytes long
 const SIGNATURE_LENGTH: usize = 64;
 
-/// Maximum amount of space in block for metainfo document 
+/// Maximum amount of space in block for metainfo document
 const MAX_METAINFO_LEN: usize = (ImageHeader::HEADER_SIZE - (METAINFO_OFFSET + SIGNATURE_LENGTH));
 
 fn is_valid_status_code(code: u8) -> bool {
@@ -61,25 +61,31 @@ fn is_valid_status_code(code: u8) -> bool {
 #[derive(Clone)]
 pub struct ImageHeader(RefCell<Vec<u8>>);
 
-const CODE_TO_LABEL: [&str; 7] = ["Invalid", "New", "Try Boot", "Good", "Failed Boot", "Bad Signature", "Bad Metainfo"];
+const CODE_TO_LABEL: [&str; 7] = [
+    "Invalid",
+    "New",
+    "Try Boot",
+    "Good",
+    "Failed Boot",
+    "Bad Signature",
+    "Bad Metainfo",
+];
 
 impl ImageHeader {
+    pub const FLAG_PREFER_BOOT: u8 = 0x01; // Set to override usual strategy for choosing a partition to boot and force this one.
+    pub const FLAG_HASH_TREE: u8 = 0x02; // dm-verity hash tree data is appended to the image
+    pub const FLAG_DATA_COMPRESSED: u8 = 0x04; // The image data is compressed and needs to be uncompressed before use.
 
-    pub const FLAG_PREFER_BOOT     : u8 = 0x01;  // Set to override usual strategy for choosing a partition to boot and force this one.
-    pub const FLAG_HASH_TREE       : u8 = 0x02;  // dm-verity hash tree data is appended to the image
-    pub const FLAG_DATA_COMPRESSED : u8 = 0x04;  // The image data is compressed and needs to be uncompressed before use.
-
-    pub const STATUS_INVALID       : u8 = 0;     // Set on partition before writing a new rootfs disk image
-    pub const STATUS_NEW           : u8 = 1;     // Set on partition after write of new rootfs disk image completes successfully
-    pub const STATUS_TRY_BOOT      : u8 = 2;     // Set on boot selected partition if in `STATUS_NEW` state.
-    pub const STATUS_GOOD          : u8 = 3;     // Set on boot when a `STATUS_TRY_BOOT` partition successfully launches desktop
-    pub const STATUS_FAILED        : u8 = 4;     // Set on boot for any partition in state `STATUS_TRY_BOOT`
-    pub const STATUS_BAD_SIG       : u8 = 5;     // Set on boot selected partition when signature fails to verify
-    pub const STATUS_BAD_META      : u8 = 6;     // Set on partition when metainfo cannot be parsed
+    pub const STATUS_INVALID: u8 = 0; // Set on partition before writing a new rootfs disk image
+    pub const STATUS_NEW: u8 = 1; // Set on partition after write of new rootfs disk image completes successfully
+    pub const STATUS_TRY_BOOT: u8 = 2; // Set on boot selected partition if in `STATUS_NEW` state.
+    pub const STATUS_GOOD: u8 = 3; // Set on boot when a `STATUS_TRY_BOOT` partition successfully launches desktop
+    pub const STATUS_FAILED: u8 = 4; // Set on boot for any partition in state `STATUS_TRY_BOOT`
+    pub const STATUS_BAD_SIG: u8 = 5; // Set on boot selected partition when signature fails to verify
+    pub const STATUS_BAD_META: u8 = 6; // Set on partition when metainfo cannot be parsed
 
     /// Size of header block
     pub const HEADER_SIZE: usize = 4096;
-
 
     pub fn new() -> ImageHeader {
         let v = vec![0u8; ImageHeader::HEADER_SIZE];
@@ -89,12 +95,9 @@ impl ImageHeader {
     }
 
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<ImageHeader> {
-        //let mut v = vec![0u8; ImageHeader::HEADER_SIZE];
         // XXX check file size is at least HEADER_SIZE
         let mut f = File::open(path.as_ref())?;
         ImageHeader::from_reader(&mut f)
-        //f.read_exact(&mut v)?;
-        //Ok(ImageHeader(RefCell::new(v)))
     }
 
     pub fn from_reader<R: Read>(r: &mut R) -> Result<ImageHeader> {
@@ -106,7 +109,12 @@ impl ImageHeader {
     pub fn from_partition<P: AsRef<Path>>(path: P) -> Result<ImageHeader> {
         let mut dev = BlockDev::open_ro(path.as_ref())?;
         let nsectors = dev.nsectors()?;
-        ensure!(nsectors >= 8, "{} is a block device bit it's too short ({} sectors)", path.as_ref().display(), nsectors);
+        ensure!(
+            nsectors >= 8,
+            "{} is a block device bit it's too short ({} sectors)",
+            path.as_ref().display(),
+            nsectors
+        );
         let mut buffer = AlignedBuffer::new(ImageHeader::HEADER_SIZE);
         dev.read_sectors(nsectors - 8, buffer.as_mut())?;
         let header = ImageHeader(RefCell::new(buffer.as_ref().into()));
@@ -116,13 +124,18 @@ impl ImageHeader {
     pub fn write_partition<P: AsRef<Path>>(&self, path: P) -> Result<()> {
         let mut dev = BlockDev::open_rw(path.as_ref())?;
         let nsectors = dev.nsectors()?;
-        ensure!(nsectors >= 8, "{} is a block device bit it's too short ({} sectors)", path.as_ref().display(), nsectors);
+        ensure!(
+            nsectors >= 8,
+            "{} is a block device bit it's too short ({} sectors)",
+            path.as_ref().display(),
+            nsectors
+        );
         let buffer = AlignedBuffer::from_slice(&self.0.borrow());
         dev.write_sectors(nsectors - 8, buffer.as_ref())?;
         Ok(())
     }
 
-    pub fn verified_metainfo(&self, config: &Config) -> Result<MetaInfo> {
+    pub fn metainfo(&self) -> Result<MetaInfo> {
         let mlen = self.metainfo_len();
         if mlen == 0 || mlen > MAX_METAINFO_LEN {
             bail!("Invalid metainfo-len field: {}", mlen);
@@ -130,7 +143,6 @@ impl ImageHeader {
         let mbytes = self.metainfo_bytes();
         let mut metainfo = MetaInfo::new(mbytes);
         metainfo.parse_toml()?;
-        metainfo.verify(config, &self.signature())?;
         Ok(metainfo)
     }
 
@@ -156,7 +168,9 @@ impl ImageHeader {
         }
     }
 
-    pub fn flags(&self) -> u8 { self.read_u8(5) }
+    pub fn flags(&self) -> u8 {
+        self.read_u8(5)
+    }
 
     pub fn has_flag(&self, flag: u8) -> bool {
         (self.flags() & flag) == flag
@@ -206,8 +220,20 @@ impl ImageHeader {
     pub fn sign_metainfo(&self, channel: &Channel) -> Result<()> {
         let mlen = self.metainfo_len();
         // XXX assert mlen is good
-        let sig = channel.sign(&self.0.borrow()[8..8+mlen])?;
-        self.write_bytes(8+mlen, &sig.to_bytes());
+        let sig = channel.sign(&self.0.borrow()[8..8 + mlen])?;
+        self.write_bytes(8 + mlen, sig.to_bytes());
+        Ok(())
+    }
+
+    pub fn verify_signature(&self, config: &Config) -> Result<()> {
+        let metainfo = self.metainfo()?;
+        let channel = match config.channel(metainfo.channel()) {
+            Some(channel) => channel,
+            None => bail!("Cannot verify signature for channel '{}' because it does not exist in configuration file", metainfo.channel()),
+        };
+        channel
+            .verify(metainfo.bytes(), &self.signature())
+            .context("failed to verify header signature")?;
         Ok(())
     }
 
@@ -245,59 +271,57 @@ impl ImageHeader {
     }
 
     fn write_bytes(&self, offset: usize, data: &[u8]) {
-        self.0.borrow_mut()[offset..offset+data.len()].copy_from_slice(data)
+        self.0.borrow_mut()[offset..offset + data.len()].copy_from_slice(data)
     }
 
     fn read_bytes(&self, offset: usize, len: usize) -> Vec<u8> {
-        Vec::from(&self.0.borrow()[offset..offset+len])
+        Vec::from(&self.0.borrow()[offset..offset + len])
     }
 }
-
 
 #[derive(Clone)]
 pub struct MetaInfo {
     bytes: Vec<u8>,
     is_parsed: bool,
-    is_valid: bool,
-    toml: Option<MetaInfoToml>, 
+    toml: Option<MetaInfoToml>,
 }
 
-
-#[derive(Deserialize,Serialize,Clone)]
+#[derive(Deserialize, Serialize, Clone)]
 struct MetaInfoToml {
+    #[serde(rename = "image-type")]
+    image_type: String,
     channel: String,
     version: u32,
-    #[serde(rename="base-version")]
+    #[serde(rename = "base-version")]
     base_version: Option<u32>,
     date: Option<String>,
     gitrev: Option<String>,
     nblocks: u32,
     shasum: String,
-    #[serde(rename="verity-salt")]
+    #[serde(rename = "verity-salt")]
     verity_salt: String,
-    #[serde(rename="verity-root")]
+    #[serde(rename = "verity-root")]
     verity_root: String,
 }
 
 impl MetaInfo {
     fn new(bytes: Vec<u8>) -> MetaInfo {
         MetaInfo {
-            bytes, 
+            bytes,
             is_parsed: false,
-            is_valid: false,
             toml: None,
         }
     }
 
-    pub fn is_valid(&self) -> bool {
-        self.is_valid
+    fn bytes(&self) -> &[u8] {
+        &self.bytes
     }
 
     pub fn parse_toml(&mut self) -> Result<()> {
         if !self.is_parsed {
             self.is_parsed = true;
-            let toml = toml::from_slice::<MetaInfoToml>(&self.bytes)
-                .context("parsing header metainfo")?;
+            let toml =
+                toml::from_slice::<MetaInfoToml>(&self.bytes).context("parsing header metainfo")?;
             self.toml = Some(toml);
         }
         Ok(())
@@ -308,15 +332,19 @@ impl MetaInfo {
             Some(channel) => channel,
             None => bail!("Channel '{}' not found in config file", self.channel()),
         };
-        channel.verify(&self.bytes, signature)
+        channel
+            .verify(&self.bytes, signature)
             .context("Bad metainfo signature in header")?;
-        
+
         Ok(())
     }
 
     fn toml(&self) -> &MetaInfoToml {
-        assert!(self.is_valid);
         self.toml.as_ref().unwrap()
+    }
+
+    pub fn image_type(&self) -> &str {
+        self.toml().image_type.as_str()
     }
 
     pub fn channel(&self) -> &str {

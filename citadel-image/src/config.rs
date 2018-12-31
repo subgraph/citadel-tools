@@ -1,21 +1,19 @@
-
-use std::path::{Path,PathBuf};
 use std::fs::File;
 use std::io::Read;
+use std::path::{Path, PathBuf};
 
 use toml;
 
 use libcitadel::Result;
 
-
 #[derive(Deserialize)]
 pub struct BuildConfig {
-    #[serde (rename="image-type")]
+    #[serde(rename = "image-type")]
     image_type: String,
     channel: String,
     version: usize,
     source: String,
-    #[serde (rename="kernel-version")]
+    #[serde(rename = "kernel-version")]
     kernel_version: Option<String>,
 
     #[serde(skip)]
@@ -64,7 +62,10 @@ impl BuildConfig {
         };
         let src = Path::new(&self.source);
         if !src.is_file() {
-            bail!("Source path '{}' does not exist or is not a regular file", src.display());
+            bail!(
+                "Source path '{}' does not exist or is not a regular file",
+                src.display()
+            );
         }
         if self.image_type == "modules" && self.kernel_version.is_none() {
             bail!("Cannot build 'modules' image without kernel-version field");

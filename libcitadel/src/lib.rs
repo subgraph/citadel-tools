@@ -23,9 +23,8 @@ macro_rules! notify {
 extern crate libc;
 extern crate serde;
 extern crate toml;
-extern crate ed25519_dalek;
-extern crate sha2;
-extern crate rand;
+extern crate ring;
+extern crate untrusted;
 extern crate rustc_serialize;
 
 use std::cell::RefCell;
@@ -45,25 +44,38 @@ pub fn set_verbose(val: bool) {
     VERBOSE.with(|f| { *f.borrow_mut() = val });
 }
 
+pub fn format_error(err: &Error) -> String {
+    let mut output = err.to_string();
+    let mut prev = err.as_fail();
+    while let Some(next) = prev.cause() {
+        output.push_str(": ");
+        output.push_str(&next.to_string());
+        prev = next;
+    }
+    output
+}
+
 mod blockdev;
 mod config;
 mod keys;
-mod disks;
 mod cmdline;
 mod header;
 mod partition;
 mod resource;
-mod path_ext;
+pub mod util;
+pub mod verity;
+mod mount;
 
 pub use config::Config;
 pub use config::Channel;
 pub use blockdev::BlockDev;
-pub use keys::SigningKeys;
 pub use cmdline::CommandLine;
 pub use header::{ImageHeader,MetaInfo};
-pub use path_ext::{PathExt,FileTypeResult,VerityOutput};
 pub use partition::Partition;
 pub use resource::ResourceImage;
+pub use keys::KeyPair;
+pub use mount::Mount;
+
 
 pub type Result<T> = result::Result<T,Error>;
 

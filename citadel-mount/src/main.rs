@@ -3,33 +3,36 @@
 
 extern crate libc;
 
-use std::env;
 use std::process::exit;
+use std::env;
 
-use libcitadel::{Result,Config,CommandLine,set_verbose,ResourceImage};
+use libcitadel::{Result,Config,CommandLine,set_verbose,format_error,ResourceImage};
+
 
 mod boot_select;
 mod rootfs;
-mod uname;
 pub use boot_select::BootSelection;
 use rootfs::Rootfs;
 
 
-/// mount command supports 3 subcommands
+/// mount command supports 4 subcommands
 ///
 ///   citadel-mount rootfs
 ///   citadel-mount modules
 ///   citadel-mount extra
+///   citadel-mount copy-artifacts
 ///
 /// 'rootfs' creates the /dev/mapper/rootfs device which will be mounted as root filesystem
 ///
 /// 'modules' mounts a resource bundle containing kernel modules
-/// 'extra' mounts a resource bundle
+/// 'extra' mounts a resource bundle containing extra files
 ///
+/// 'copy-artifacts' searches for a boot partition containing an /images
+/// directory and copies all image files to /run/images.  Also, it
+/// copies bzImage and EFI/BOOT/bootx64.efi
 ///
 
 fn main() {
-
 
     if CommandLine::verbose() {
         set_verbose(true);
@@ -52,8 +55,8 @@ fn main() {
         _ => Err(format_err!("Bad or missing argument")),
     };
 
-    if let Err(e) = result {
-        warn!("Failed: {}", e);
+    if let Err(ref e) = result {
+        warn!("Failed: {}", format_error(e));
         exit(1);
     }
 }
@@ -66,17 +69,14 @@ fn mount_rootfs(config: Config) -> Result<()> {
 
 fn mount_modules(config: Config) -> Result<()> {
     info!("citadel-mount modules");
-    let utsname = uname::uname();
-    let v = utsname.release().split("-").collect::<Vec<_>>();
-    let name = format!("citadel-modules-{}", v[0]);
-    let mut image = ResourceImage::find(&name)?;
+    let mut image = ResourceImage::find("modules")?;
     image.mount(&config)?;
     Ok(())
 }
 
 fn mount_extra(config: Config) -> Result<()> {
     info!("citadel-mount extra");
-    let mut image = ResourceImage::find("citadel-extra")?;
+    let mut image = ResourceImage::find("extra")?;
     image.mount(&config)?;
     Ok(())
 }

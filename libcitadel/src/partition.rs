@@ -1,6 +1,6 @@
 use std::path::{Path,PathBuf};
 use std::fs;
-use {Config,Result,ImageHeader,MetaInfo,PathExt};
+use {Config,CommandLine,Result,ImageHeader,MetaInfo,Mount};
 
 #[derive(Clone)]
 pub struct Partition {
@@ -16,27 +16,27 @@ struct HeaderInfo {
 }
 
 impl Partition {
-    pub fn rootfs_partitions(config: &Config) -> Result<Vec<Partition>> {
+    pub fn rootfs_partitions() -> Result<Vec<Partition>> {
         let mut v = Vec::new();
         for path in rootfs_partition_paths()? {
-            let partition = Partition::load(&path, config)?;
+            let partition = Partition::load(&path)?;
             v.push(partition);
         }
         Ok(v)
     }
 
-    fn load(dev: &Path, config: &Config) -> Result<Partition> {
-        let is_mounted = is_path_mounted(dev)?;
-        let header = Partition::load_header(dev, config)?;
+    fn load(dev: &Path) -> Result<Partition> {
+        let is_mounted = is_in_use(dev)?;
+        let header = Partition::load_header(dev)?;
         Ok(Partition::new(dev, header, is_mounted))
     }
 
-    fn load_header(dev: &Path, config: &Config) -> Result<Option<HeaderInfo>> {
+    fn load_header(dev: &Path) -> Result<Option<HeaderInfo>> {
         let header = ImageHeader::from_partition(dev)?;
         if !header.is_magic_valid() {
             return Ok(None);
         }
-        let metainfo = match header.verified_metainfo(config) {
+        let metainfo = match header.metainfo() {
             Ok(metainfo) => metainfo,
             Err(e) => {
                 warn!("Reading partition {}: {}", dev.display(), e);
@@ -116,9 +116,46 @@ impl Partition {
         if self.header().status() == ImageHeader::STATUS_TRY_BOOT {
             self.write_status(ImageHeader::STATUS_FAILED)?;
         }
-        // XXX verify signature
+
+        if !CommandLine::nosignatures() {
+            if let Err(e) = self.header().verify_signature(config) {
+                warn!("Signature verification failed on partition: {}", e);
+                self.write_status(ImageHeader::STATUS_BAD_SIG)?;
+            }
+        }
         Ok(())
     }
+}
+
+fn is_in_use(path: &Path) -> Result<bool> {
+    if Mount::is_path_mounted(path)? {
+        return Ok(true);
+    }
+    let holders = count_block_holders(path)?;
+    Ok(holders > 0)
+}
+
+//
+// Resolve /dev/mapper/citadel-rootfsX symlink to actual device name
+// and then inspect directory /sys/block/${DEV}/holders and return
+// the number of entries this directory contains. If this directory
+// is not empty then device belongs to another device mapping.
+//
+fn count_block_holders(path: &Path) -> Result<usize> {
+    if !path.exists() {
+        bail!("Path to rootfs device does not exist: {}", path.display());
+    }
+    let resolved = fs::canonicalize(path)?;
+    let fname = match resolved.file_name() {
+        Some(s) => s,
+        None => bail!("path does not have filename?"),
+    };
+    let holders_dir =
+        Path::new("/sys/block")
+        .join(fname)
+        .join("holders");
+    let count = fs::read_dir(holders_dir)?.count();
+    Ok(count)
 }
 
 fn rootfs_partition_paths() -> Result<Vec<PathBuf>> {
@@ -145,19 +182,3 @@ fn path_filename(path: &Path) -> &str {
     ""
 }
 
-///
-/// Returns `true` if `path` matches the source field (first field) 
-/// of any of the mount lines listed in /proc/mounts
-///
-pub fn is_path_mounted(path: &Path) -> Result<bool> {
-    let path_str = path.to_str().unwrap();
-
-    for line in Path::new("/proc/mounts").read_as_lines()? {
-        if let Some(s) = line.split_whitespace().next() {
-            if s == path_str {
-                return Ok(true);
-            }
-        }
-    }
-    Ok(false)
-}

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::fs;
 
-use {Result,PathExt};
+use Result;
 
 lazy_static! {
     static ref CMDLINE: CommandLine = match CommandLine::load() {
@@ -41,9 +41,18 @@ impl CommandLine {
         CommandLine::var_exists("citadel.noverity")
     }
 
+    pub fn nosignatures() -> bool {
+        CommandLine::var_exists("citadel.nosignatures")
+    }
+
     /// Return `true` if variable citadel.install is present on kernel command line.
     pub fn install_mode() -> bool {
         CommandLine::var_exists("citadel.install")
+    }
+
+    /// Return `true` if variable citadel.live is present on kernel command line.
+    pub fn live_mode() -> bool {
+        CommandLine::var_exists("citadel.live")
     }
 
     /// Return `true` if variable citadel.recovery is present on kernel command line.
@@ -61,7 +70,7 @@ impl CommandLine {
     }
 
     fn load() -> Result<CommandLine> {
-        let s = Path::new("/proc/cmdline").read_as_string()?;
+        let s = fs::read_to_string("/proc/cmdline")?;
         let varmap = CommandLineParser::new(s).parse();
         Ok(CommandLine{varmap})
     }
