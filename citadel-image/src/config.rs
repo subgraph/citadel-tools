@@ -86,6 +86,10 @@ impl BuildConfig {
         &self.img_name
     }
 
+    pub fn kernel_version(&self) -> Option<&str> {
+        self.kernel_version.as_ref().map(|s| s.as_str())
+    }
+
     pub fn version(&self) -> usize {
         self.version
     }

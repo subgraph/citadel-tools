@@ -148,6 +148,7 @@ impl UpdateBuilder {
         hdr.set_flag(ImageHeader::FLAG_DATA_COMPRESSED);
 
         let metainfo = self.generate_metainfo();
+        fs::write(self.config.workdir_path("metainfo"), &metainfo)?;
         hdr.set_metainfo_bytes(&metainfo);
         Ok(hdr)
     }
@@ -163,6 +164,9 @@ impl UpdateBuilder {
 
         let mut v = Vec::new();
         writeln!(v, "image-type = \"{}\"", self.config.image_type())?;
+        if let Some(kv) = self.config.kernel_version() {
+            writeln!(v, "kernel-version = \"{}\"", kv)?;
+        }
         writeln!(v, "channel = \"{}\"", self.config.channel())?;
         writeln!(v, "version = {}", self.config.version())?;
         writeln!(v, "nblocks = {}", self.nblocks.unwrap())?;
