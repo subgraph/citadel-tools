@@ -1,4 +1,5 @@
-use std::fs::{self, File};
+use std::fs::{self,File,DirEntry};
+use std::ffi::OsStr;
 use std::io::{self,Seek,SeekFrom};
 use std::path::{Path, PathBuf};
 
@@ -33,40 +34,36 @@ pub struct ResourceImage {
 }
 
 impl ResourceImage {
-    /// Locate and return a resource image with `name`.
+    /// Locate and return a resource image of type `image_type`.
     /// First the /run/images directory is searched, and if not found there,
     /// the image will be searched for in /storage/resources/$channel
-    pub fn find(name: &str) -> Result<ResourceImage> {
-        let filename = ResourceImage::image_filename(name);
-
-        let run_path = Path::new(RUN_DIRECTORY).join(&filename);
-
+    pub fn find(image_type: &str) -> Result<ResourceImage> {
         let channel = ResourceImage::read_rootfs_channel()?;
-        let storage_path = Path::new(STORAGE_BASEDIR).join(channel).join(&filename);
 
-        if run_path.exists() {
-            return ResourceImage::from_path(run_path);
+        info!("Searching run directory for image {} with channel {}", image_type, channel);
+
+        if let Some(image) = search_directory(RUN_DIRECTORY, image_type, Some(&channel))? {
+            return Ok(image);
         }
 
         if !ResourceImage::ensure_storage_mounted()? {
             bail!("Unable to mount /storage");
         }
 
-        if storage_path.exists() {
-            ResourceImage::from_path(storage_path)
-        } else {
-            Err(format_err!("Failed to find resource image: {}", name))
+        let storage_path = Path::new(STORAGE_BASEDIR).join(&channel);
+
+        if let Some(image) = search_directory(storage_path, image_type, Some(&channel))? {
+           return Ok(image);
         }
+
+        Err(format_err!("Failed to find resource image of type: {}", image_type))
     }
 
     /// Locate a rootfs image in /run/images and return it
     pub fn find_rootfs() -> Result<ResourceImage> {
-        let rootfs_path = Path::new(RUN_DIRECTORY).join(ResourceImage::image_filename("rootfs"));
-        if rootfs_path.exists() {
-            info!("Found rootfs image at {}", rootfs_path.display());
-            ResourceImage::from_path(rootfs_path)
-        } else {
-            Err(format_err!("Failed to find rootfs resource image"))
+        match search_directory(RUN_DIRECTORY, "rootfs", None)? {
+            Some(image) => Ok(image),
+            None => Err(format_err!("Failed to find rootfs resource image")),
         }
     }
 
@@ -332,22 +329,146 @@ impl ResourceImage {
     }
 
     fn read_rootfs_channel() -> Result<String> {
-        let s = fs::read_to_string("/sysroot/etc/citadel-channel")
-            .context("Failed to open /sysroot/etc/citadel-channel")?;
+        let channel_file = if Path::new("/etc/initrd-release").exists() {
+            "/sysroot/etc/citadel-channel"
+        } else {
+            "/etc/citadel-channel"
+        };
+
+        let s = fs::read_to_string(channel_file)
+            .context(format!("Failed to open {}", channel_file))?;
+
         match s.split_whitespace().next() {
             Some(s) => Ok(s.to_owned()),
             None => Err(format_err!("Failed to parse /sysroot/etc/citadel-channel contents")),
         }
     }
+}
 
 
-    fn image_filename(image_type: &str) -> String {
-        if image_type == "modules" {
-            let utsname = util::uname();
-            let v = utsname.release().split("-").collect::<Vec<_>>();
-            format!("citadel-modules-{}.img", v[0])
+// Search directory for a resource image with the specified channel and image_type
+// in the image header metainfo.  If multiple matches are found, return the image
+// with the highest version number. If multiple images have the same highest version
+// number, return the image with the newest file creation time.
+fn search_directory<P: AsRef<Path>>(dir: P, image_type: &str, channel: Option<&str>) -> Result<Option<ResourceImage>> {
+    if !dir.as_ref().exists() {
+        return Ok(None)
+    }
+
+    let mut best = None;
+
+    let mut matches = all_matching_images(dir.as_ref(), image_type, channel)?;
+    info!("Found {} matching images", matches.len());
+
+    if channel.is_none() {
+        if matches.is_empty() {
+            return Ok(None);
+        }
+        if matches.len() > 1 {
+           warn!("Found multiple images of type {} in {}, but no channel specified. Returning arbitrary image",
+                 image_type, dir.as_ref().display());
+        }
+        return Ok(Some(matches.remove(0)))
+    }
+
+    for image in matches {
+        best = Some(compare_images(best, image)?);
+    }
+
+    Ok(best)
+}
+
+// Compare two images (a and b) and return the image with the highest version number. If
+// both images have the same version return the one with the newest file creation
+// time.  Image a is an Option type, if it is None then just return b.
+fn compare_images(a: Option<ResourceImage>, b: ResourceImage) -> Result<ResourceImage> {
+    let a = match a {
+        Some(img) => img,
+        None => return Ok(b),
+    };
+
+    let ver_a = a.metainfo().version();
+    let ver_b = b.metainfo().version();
+
+    if ver_a > ver_b {
+        Ok(a)
+    } else if ver_b > ver_a {
+        Ok(b)
+    } else {
+        // versions are the same so compare file times
+        let a_time = a.path().metadata()?.created()?;
+        let b_time = b.path().metadata()?.created()?;
+        if a_time > b_time {
+            Ok(a)
         } else {
-            format!("citadel-{}.img", image_type)
+            Ok(b)
         }
     }
+}
+
+fn current_kernel_version() -> String {
+    let utsname = util::uname();
+    let v = utsname.release().split("-").collect::<Vec<_>>();
+    v[0].to_string()
+}
+
+//
+// Read a directory search for ResourceImages which match the channel
+// and image_type.
+//
+fn all_matching_images(dir: &Path, image_type: &str, channel: Option<&str>) -> Result<Vec<ResourceImage>> {
+    let kernel_version = current_kernel_version();
+    let kv = if image_type == "modules" {
+        Some(kernel_version.as_str())
+    } else {
+        None
+    };
+
+    let mut v = Vec::new();
+    for entry in fs::read_dir(dir)? {
+        maybe_add_dir_entry(entry?, image_type, channel, kv, &mut v)?;
+    }
+    Ok(v)
+}
+
+// Examine a directory entry to determine if it is a resource image which
+// matches a given channel and image_type.  If the image_type is "modules"
+// then also match the kernel-version field. If channel is None then don't
+// consider the channel in the match.
+//
+// If the entry is a match, then instantiate a ResourceImage and add it to
+// the images vector.
+fn maybe_add_dir_entry(entry: DirEntry,
+                       image_type: &str,
+                       channel: Option<&str>,
+                       kernel_version: Option<&str>,
+                       images: &mut Vec<ResourceImage>) -> Result<()> {
+
+    let path = entry.path();
+    if Some(OsStr::new("img")) != path.extension() {
+        return Ok(())
+    }
+    let meta = entry.metadata()?;
+    if meta.len() < ImageHeader::HEADER_SIZE as u64 {
+        return Ok(())
+    }
+    let header = ImageHeader::from_file(&path)?;
+    if !header.is_magic_valid() {
+        return Ok(())
+    }
+
+    let metainfo = header.metainfo()?;
+
+    info!("Found an image type={} channel={} kernel={:?}", metainfo.image_type(), metainfo.channel(), metainfo.kernel_version());
+
+    if let Some(channel) = channel {
+        if metainfo.channel() != channel {
+            return Ok(());
+        }
+    }
+
+    if metainfo.image_type() == image_type && metainfo.kernel_version() == kernel_version {
+        images.push(ResourceImage::new(&path, header, metainfo));
+    }
+    Ok(())
 }
