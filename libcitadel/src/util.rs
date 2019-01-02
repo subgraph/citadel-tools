@@ -11,7 +11,7 @@ use Result;
 
 pub fn ensure_command_exists(cmd_path: &str) -> Result<()> {
     if !Path::new(cmd_path).exists() {
-        bail!("Cannot execute '{}': command does not exist");
+        bail!("Cannot execute '{}': command does not exist", cmd_path);
     }
     Ok(())
 }
