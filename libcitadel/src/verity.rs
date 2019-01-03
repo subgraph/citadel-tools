@@ -32,15 +32,13 @@ pub fn generate_image_hashtree<P: AsRef<Path>>(image: P, metainfo: &MetaInfo) ->
 
 pub fn verify_image<P: AsRef<Path>>(image: P, metainfo: &MetaInfo) -> Result<bool> {
     let arg_offset = format!("--hash-offset={}", metainfo.nblocks() * 4096);
-    let loopdev = create_image_loop_device(image.as_ref())?;
+    let image = format!("{}", image.as_ref().display());
+
 
     let status = Command::new(VERITYSETUP)
-        .args(&[ arg_offset.as_str(), "verify", &loopdev, &loopdev, metainfo.verity_root()])
+        .args(&[ arg_offset.as_str(), "verify", image.as_str(), image.as_str(), metainfo.verity_root()])
         .stderr(Stdio::inherit())
         .status()?;
-
-    util::exec_cmdline(LOSETUP, format!("-d {}", loopdev))
-        .context("Error removing loop device created for verification")?;
 
     Ok(status.success())
 }
