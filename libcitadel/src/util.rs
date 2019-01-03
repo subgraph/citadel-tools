@@ -27,6 +27,18 @@ pub fn exec_cmdline<S: AsRef<str>>(cmd_path: &str, args: S) -> Result<()> {
     check_cmd_status(cmd_path, &status)
 }
 
+pub fn exec_cmdline_quiet<S: AsRef<str>>(cmd_path: &str, args: S) -> Result<()> {
+    ensure_command_exists(cmd_path)?;
+    let args: Vec<&str> = args.as_ref().split_whitespace().collect::<Vec<_>>();
+    let status = Command::new(cmd_path)
+        .args(args)
+        .stderr(Stdio::null())
+        .stdout(Stdio::null())
+        .status()?;
+
+    check_cmd_status(cmd_path, &status)
+}
+
 pub fn exec_cmdline_with_output<S: AsRef<str>>(cmd_path: &str, args: S) -> Result<String> {
     ensure_command_exists(cmd_path)?;
     let args: Vec<&str> = args.as_ref().split_whitespace().collect::<Vec<_>>();
