@@ -66,16 +66,46 @@ pub mod util;
 pub mod verity;
 mod mount;
 
-pub use config::Config;
-pub use config::Channel;
+pub use config::OsRelease;
 pub use blockdev::BlockDev;
 pub use cmdline::CommandLine;
 pub use header::{ImageHeader,MetaInfo};
 pub use partition::Partition;
 pub use resource::ResourceImage;
-pub use keys::KeyPair;
+pub use keys::{KeyPair,PublicKey};
 pub use mount::Mount;
 
+const DEVKEYS_HEX: &str =
+    "3053020101300506032b6570042204206ed2849c6c5168e1aebc50005ac3d4a4e84af4889e4e0189bb4c787e6ee0be49a1230321006b652764c62a1de35e7e37af2b743e9a5b82cee2211cf3091d2514441b417f5f";
+
+pub fn devkeys() -> KeyPair {
+    KeyPair::from_hex(&DEVKEYS_HEX)
+        .expect("Error parsing built in dev channel keys")
+}
+
+pub fn public_key_for_channel(channel: &str) -> Result<Option<PublicKey>> {
+    if channel == "dev" {
+        return Ok(Some(devkeys().public_key()));
+    }
+
+    // Look in /etc/os-release
+    if Some(channel) == OsRelease::citadel_channel() {
+        if let Some(hex) = OsRelease::citadel_image_pubkey() {
+            let pubkey = PublicKey::from_hex(hex)?;
+            return Ok(Some(pubkey));
+        }
+    }
+
+    // Does kernel command line have citadel.channel=name:[hex encoded pubkey]
+    if Some(channel) == CommandLine::channel_name() {
+        if let Some(hex) = CommandLine::channel_pubkey() {
+            let pubkey = PublicKey::from_hex(hex)?;
+            return Ok(Some(pubkey))
+        }
+    }
+
+    Ok(None)
+}
 
 pub type Result<T> = result::Result<T,Error>;
 

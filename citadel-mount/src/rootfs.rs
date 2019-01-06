@@ -1,18 +1,17 @@
 use std::process::Command;
 
-use libcitadel::{BlockDev,CommandLine,Config,ImageHeader,Partition,Result,verity};
+use libcitadel::{BlockDev,CommandLine,Partition,Result,verity};
 use std::path::Path;
 use std::process::Stdio;
 use BootSelection;
 use ResourceImage;
 
 pub struct Rootfs {
-    config: Config,
 }
 
 impl Rootfs {
-    pub fn new(config: Config) -> Rootfs {
-        Rootfs { config }
+    pub fn new() -> Rootfs {
+        Rootfs {}
     }
 
     pub fn setup(&self) -> Result<()> {
@@ -53,17 +52,8 @@ impl Rootfs {
         self.setup_linear_mapping(&loopdev)
     }
 
-    fn maybe_check_signature(&self, hdr: &ImageHeader) -> Result<()> {
-        if !CommandLine::nosignatures() {
-            let signature = hdr.signature();
-            let metainfo = hdr.metainfo()?;
-            metainfo.verify(&self.config, &signature)?;
-        }
-        Ok(())
-    }
-
     fn setup_resource_verified(&self, img: &ResourceImage) -> Result<()> {
-        let _ = img.setup_verity_device(&self.config)?;
+        let _ = img.setup_verity_device()?;
         Ok(())
     }
 
@@ -74,7 +64,10 @@ impl Rootfs {
 
     fn setup_partition_verified(&self, partition: &Partition) -> Result<()> {
         info!("Creating /dev/mapper/rootfs dm-verity device");
-        self.maybe_check_signature(partition.header())?;
+        if !CommandLine::nosignatures() {
+            partition.header().verify_signature()?;
+            info!("Image signature is valid for channel {}", partition.metainfo().channel());
+        }
         verity::setup_partition_device(partition)?;
         Ok(())
     }

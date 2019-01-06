@@ -8,7 +8,7 @@ use failure::ResultExt;
 use toml;
 
 use blockdev::AlignedBuffer;
-use {BlockDev, Channel, Config, Result};
+use {BlockDev,Result,public_key_for_channel};
 
 /// Expected magic value in header
 const MAGIC: &[u8] = b"SGOS";
@@ -217,24 +217,25 @@ impl ImageHeader {
         self.read_bytes(METAINFO_OFFSET + mlen, SIGNATURE_LENGTH)
     }
 
-    pub fn sign_metainfo(&self, channel: &Channel) -> Result<()> {
+    pub fn set_signature(&self, signature: &[u8]) -> Result<()> {
+        if signature.len() != SIGNATURE_LENGTH {
+            bail!("Signature has invalid length: {}", signature.len());
+        }
         let mlen = self.metainfo_len();
-        // XXX assert mlen is good
-        let sig = channel.sign(&self.0.borrow()[8..8 + mlen])?;
-        self.write_bytes(8 + mlen, sig.to_bytes());
+        self.write_bytes(8 + mlen, signature);
         Ok(())
     }
 
-    pub fn verify_signature(&self, config: &Config) -> Result<()> {
+    pub fn verify_signature(&self) -> Result<()> {
         let metainfo = self.metainfo()?;
-        let channel = match config.channel(metainfo.channel()) {
-            Some(channel) => channel,
-            None => bail!("Cannot verify signature for channel '{}' because it does not exist in configuration file", metainfo.channel()),
-        };
-        channel
-            .verify(metainfo.bytes(), &self.signature())
-            .context("failed to verify header signature")?;
-        Ok(())
+
+        if let Some(pubkey) = public_key_for_channel(metainfo.channel())? {
+            if !pubkey.verify(&self.metainfo_bytes(), &self.signature()) {
+                bail!("Header signature verification failed");
+            }
+            return Ok(())
+        }
+        Err(format_err!("Cannot verify signature because no public key found for channel '{}'", metainfo.channel()))
     }
 
     pub fn write_header<W: Write>(&self, mut writer: W) -> Result<()> {
@@ -315,10 +316,6 @@ impl MetaInfo {
         }
     }
 
-    fn bytes(&self) -> &[u8] {
-        &self.bytes
-    }
-
     pub fn parse_toml(&mut self) -> Result<()> {
         if !self.is_parsed {
             self.is_parsed = true;
@@ -326,18 +323,6 @@ impl MetaInfo {
                 toml::from_slice::<MetaInfoToml>(&self.bytes).context("parsing header metainfo")?;
             self.toml = Some(toml);
         }
-        Ok(())
-    }
-
-    pub fn verify(&self, config: &Config, signature: &[u8]) -> Result<()> {
-        let channel = match config.channel(self.channel()) {
-            Some(channel) => channel,
-            None => bail!("Channel '{}' not found in config file", self.channel()),
-        };
-        channel
-            .verify(&self.bytes, signature)
-            .context("Bad metainfo signature in header")?;
-
         Ok(())
     }
 

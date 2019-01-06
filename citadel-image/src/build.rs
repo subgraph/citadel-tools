@@ -150,6 +150,11 @@ impl UpdateBuilder {
         let metainfo = self.generate_metainfo();
         fs::write(self.config.workdir_path("metainfo"), &metainfo)?;
         hdr.set_metainfo_bytes(&metainfo);
+
+        if self.config.channel() == "dev" {
+            let sig = devkeys().sign(&metainfo);
+            hdr.set_signature(sig.to_bytes())?;
+        }
         Ok(hdr)
     }
 

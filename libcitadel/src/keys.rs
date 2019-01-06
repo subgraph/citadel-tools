@@ -16,17 +16,34 @@ pub struct KeyPair([u8; ED25519_PKCS8_V2_LEN]);
 pub struct Signature(signature::Signature);
 
 impl PublicKey {
-    pub fn from_bytes(bytes: &[u8]) -> Result<PublicKey> {
+
+    pub fn from_hex(hex: &str) -> Result<PublicKey> {
+        let bytes = hex.from_hex()?;
+        if bytes.len() != ED25519_PUBLIC_KEY_LEN {
+            bail!("Hex encoded public key has invalid length: {}", bytes.len());
+        }
+        Ok(PublicKey::from_bytes(&bytes))
+    }
+
+    pub fn to_hex(&self) -> String {
+        self.0.to_hex()
+    }
+
+    fn from_bytes(bytes: &[u8]) -> PublicKey {
         let mut key = [0u8; ED25519_PUBLIC_KEY_LEN];
         key.copy_from_slice(bytes);
-        Ok(PublicKey(key))
+        PublicKey(key)
     }
-    pub fn verify(&self, data: &[u8], signature: &[u8]) -> Result<()> {
+
+    pub fn verify(&self, data: &[u8], signature: &[u8]) -> bool {
         let signature = Input::from(signature);
         let data = Input::from(data);
         let pubkey = Input::from(&self.0);
-        signature::verify(&signature::ED25519, pubkey, data, signature)?;
-        Ok(())
+
+        match signature::verify(&signature::ED25519, pubkey, data, signature) {
+            Ok(()) => true,
+            Err(_) => false,
+        }
     }
 }
 
@@ -40,7 +57,6 @@ impl KeyPair {
         let rng = rand::SystemRandom::new();
         let bytes = Ed25519KeyPair::generate_pkcs8(&rng)?;
         KeyPair::from_bytes(&bytes)
-
     }
 
     pub fn from_hex(hex: &str) -> Result<KeyPair> {
@@ -50,30 +66,32 @@ impl KeyPair {
     fn from_bytes(bytes: &[u8]) -> Result<KeyPair> {
         let mut pair = [0u8; ED25519_PKCS8_V2_LEN];
         pair.copy_from_slice(bytes);
+        let _ = Ed25519KeyPair::from_pkcs8(Input::from(&pair))?;
         Ok(KeyPair(pair))
     }
 
-    pub fn public_key_bytes(&self) -> Vec<u8> {
-        let pair = Ed25519KeyPair::from_pkcs8(Input::from(&self.0)).expect("failed to parse pkcs8 key");
-        pair.public_key_bytes().to_vec()
+    fn get_keys(&self) -> Ed25519KeyPair {
+        Ed25519KeyPair::from_pkcs8(Input::from(&self.0))
+            .expect("failed to parse pkcs8 key")
     }
 
-    pub fn private_key_bytes(&self) -> Vec<u8> {
-        self.0.to_vec()
+    pub fn public_key(&self) -> PublicKey {
+        let keys = self.get_keys();
+        PublicKey::from_bytes(keys.public_key_bytes())
     }
 
     pub fn private_key_hex(&self) -> String {
         self.0.to_hex()
     }
-    pub fn public_key_hex(&self) -> String {
-        let pair = Ed25519KeyPair::from_pkcs8(Input::from(&self.0)).expect("failed to parse pkcs8 key");
-        pair.public_key_bytes().to_hex()
+
+    pub fn sign(&self, data: &[u8]) -> Signature {
+        let keys = self.get_keys();
+        let signature = keys.sign(data);
+        Signature(signature)
     }
 
-    pub fn sign(&self, data: &[u8]) -> Result<Signature> {
-        let pair = Ed25519KeyPair::from_pkcs8(Input::from(&self.0))?;
-        let signature = pair.sign(data);
-        Ok(Signature(signature))
+    pub fn verify(&self, data: &[u8], signature: &[u8]) -> bool {
+        self.public_key().verify(data, signature)
     }
 }
 
