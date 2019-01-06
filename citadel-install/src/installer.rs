@@ -38,7 +38,7 @@ const LUKS_PASSPHRASE_FILE: &str = "/run/installer/luks-passphrase";
 
 const DEFAULT_ARTIFACT_DIRECTORY: &str = "/run/images";
 
-const KERNEL_CMDLINE: &str = "add_efi_memmap intel_iommu=off cryptomgr.notests rcupdate.rcu_expedited=1 rcu_nocbs=0-64 tsc=reliable no_timer_check noreplace-smp i915.fastboot=1 citadel.nosignatures quiet splash";
+const KERNEL_CMDLINE: &str = "add_efi_memmap intel_iommu=off cryptomgr.notests rcupdate.rcu_expedited=1 rcu_nocbs=0-64 tsc=reliable no_timer_check noreplace-smp i915.fastboot=1 quiet splash";
 
 pub struct Installer {
     install_syslinux: bool,
