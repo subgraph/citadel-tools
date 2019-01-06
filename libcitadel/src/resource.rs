@@ -3,7 +3,7 @@ use std::ffi::OsStr;
 use std::io::{self,Seek,SeekFrom};
 use std::path::{Path, PathBuf};
 
-use {CommandLine,ImageHeader,MetaInfo,Result,Partition,Mount,verity,util};
+use {CommandLine,OsRelease,ImageHeader,MetaInfo,Result,Partition,Mount,verity,util};
 
 use failure::ResultExt;
 
@@ -437,23 +437,25 @@ fn current_kernel_version() -> String {
 //
 fn all_matching_images(dir: &Path, image_type: &str, channel: Option<&str>) -> Result<Vec<ResourceImage>> {
     let kernel_version = current_kernel_version();
-    let kv = if image_type == "modules" {
+    let kv = if image_type == "kernel" {
         Some(kernel_version.as_str())
     } else {
         None
     };
 
+    let kernel_id = OsRelease::citadel_kernel_id();
+
     let mut v = Vec::new();
     for entry in fs::read_dir(dir)? {
-        maybe_add_dir_entry(entry?, image_type, channel, kv, &mut v)?;
+        maybe_add_dir_entry(entry?, image_type, channel, kv, kernel_id, &mut v)?;
     }
     Ok(v)
 }
 
 // Examine a directory entry to determine if it is a resource image which
-// matches a given channel and image_type.  If the image_type is "modules"
-// then also match the kernel-version field. If channel is None then don't
-// consider the channel in the match.
+// matches a given channel and image_type.  If the image_type is "kernel"
+// then also match the kernel-version and kernel-id fields. If channel
+// is None then don't consider the channel in the match.
 //
 // If the entry is a match, then instantiate a ResourceImage and add it to
 // the images vector.
@@ -461,6 +463,7 @@ fn maybe_add_dir_entry(entry: DirEntry,
                        image_type: &str,
                        channel: Option<&str>,
                        kernel_version: Option<&str>,
+                       kernel_id: Option<&str>,
                        images: &mut Vec<ResourceImage>) -> Result<()> {
 
     let path = entry.path();
@@ -486,8 +489,17 @@ fn maybe_add_dir_entry(entry: DirEntry,
         }
     }
 
-    if metainfo.image_type() == image_type && metainfo.kernel_version() == kernel_version {
-        images.push(ResourceImage::new(&path, header, metainfo));
+    if image_type != metainfo.image_type() {
+        return Ok(())
     }
+
+    if image_type == "kernel" {
+        if metainfo.kernel_version() != kernel_version || metainfo.kernel_id() != kernel_id {
+            return Ok(());
+        }
+    }
+
+    images.push(ResourceImage::new(&path, header, metainfo));
+
     Ok(())
 }

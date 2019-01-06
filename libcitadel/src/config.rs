@@ -88,6 +88,14 @@ impl OsRelease {
         OsRelease::get_int_value("CITADEL_ROOTFS_VERSION")
     }
 
+    pub fn citadel_kernel_version() -> Option<&'static str> {
+        OsRelease::get_value("CITADEL_KERNEL_VERSION")
+    }
+
+    pub fn citadel_kernel_id() -> Option<&'static str> {
+        OsRelease::get_value("CITADEL_KERNEL_ID")
+    }
+
     fn _get_value(&self, key: &str) -> Option<&str> {
         self.vars.get(key).map(|v| v.as_str())
     }

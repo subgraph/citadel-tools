@@ -294,6 +294,8 @@ struct MetaInfoToml {
     channel: String,
     #[serde(rename = "kernel-version")]
     kernel_version: Option<String>,
+    #[serde(rename = "kernel-id")]
+    kernel_id: Option<String>,
     version: u32,
     #[serde(rename = "base-version")]
     base_version: Option<u32>,
@@ -339,6 +341,8 @@ impl MetaInfo {
     }
 
     pub fn kernel_version(&self) -> Option<&str> { self.toml().kernel_version.as_ref().map(|s| s.as_str()) }
+
+    pub fn kernel_id(&self) -> Option<&str> { self.toml().kernel_id.as_ref().map(|s| s.as_str()) }
 
     pub fn version(&self) -> u32 {
         self.toml().version

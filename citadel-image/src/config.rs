@@ -15,6 +15,8 @@ pub struct BuildConfig {
     source: String,
     #[serde(rename = "kernel-version")]
     kernel_version: Option<String>,
+    #[serde(rename = "kernel-id")]
+    kernel_id: Option<String>,
 
     #[serde(skip)]
     basedir: PathBuf,
@@ -57,7 +59,7 @@ impl BuildConfig {
 
     fn validate(&self) -> Result<()> {
         let itype = self.image_type.as_str();
-        if itype != "extra" && itype != "rootfs" && itype != "modules" {
+        if itype != "extra" && itype != "rootfs" && itype != "kernel" {
             bail!("Invalid image type '{}'", self.image_type);
         };
         let src = Path::new(&self.source);
@@ -67,8 +69,8 @@ impl BuildConfig {
                 src.display()
             );
         }
-        if self.image_type == "modules" && self.kernel_version.is_none() {
-            bail!("Cannot build 'modules' image without kernel-version field");
+        if self.image_type == "kernel" && self.kernel_version.is_none() {
+            bail!("Cannot build 'kernel' image without kernel-version field");
         }
 
         Ok(())
@@ -88,6 +90,10 @@ impl BuildConfig {
 
     pub fn kernel_version(&self) -> Option<&str> {
         self.kernel_version.as_ref().map(|s| s.as_str())
+    }
+
+    pub fn kernel_id(&self) -> Option<&str> {
+        self.kernel_id.as_ref().map(|s| s.as_str())
     }
 
     pub fn version(&self) -> usize {

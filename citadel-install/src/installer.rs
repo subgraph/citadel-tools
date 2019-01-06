@@ -77,10 +77,10 @@ impl Installer {
             MKFS_VFAT,MKFS_BTRFS,LSBLK,BTRFS,MOUNT,UMOUNT,CHOWN,TAR,XZ,CITADEL_IMAGE,
         ];
 
-        let modules_img = self.modules_imagename();
+        let kernel_img = self.kernel_imagename();
         let artifacts = vec![
             "bootx64.efi", "bzImage",
-            modules_img.as_str(), EXTRA_IMAGE_NAME,
+            kernel_img.as_str(), EXTRA_IMAGE_NAME,
         ];
 
         if self.target_device.is_empty() {
@@ -371,16 +371,16 @@ impl Installer {
 
         self.copy_artifact(EXTRA_IMAGE_NAME, &resources)?;
 
-        let modules = self.modules_imagename();
-        self.copy_artifact(&modules, &resources)?;
+        let kernel_img = self.kernel_imagename();
+        self.copy_artifact(&kernel_img, &resources)?;
 
         Ok(())
     }
 
-    fn modules_imagename(&self) -> String {
+    fn kernel_imagename(&self) -> String {
         let utsname = util::uname();
         let v = utsname.release().split("-").collect::<Vec<_>>();
-        format!("citadel-modules-{}.img", v[0])
+        format!("citadel-kernel-{}.img", v[0])
     }
 
     fn target_partition(&self, num: usize) -> String {

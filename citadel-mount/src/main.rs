@@ -18,13 +18,13 @@ use rootfs::Rootfs;
 /// mount command supports 4 subcommands
 ///
 ///   citadel-mount rootfs
-///   citadel-mount modules
+///   citadel-mount kernel
 ///   citadel-mount extra
 ///   citadel-mount copy-artifacts
 ///
 /// 'rootfs' creates the /dev/mapper/rootfs device which will be mounted as root filesystem
 ///
-/// 'modules' mounts a resource bundle containing kernel modules
+/// 'kernel' mounts a resource bundle containing kernel modules
 /// 'extra' mounts a resource bundle containing extra files
 ///
 /// 'copy-artifacts' searches for a boot partition containing an /images
@@ -42,7 +42,7 @@ fn main() {
     args.next();
     let result = match args.next() {
         Some(ref s) if s == "rootfs" => mount_rootfs(),
-        Some(ref s) if s == "modules" => mount_modules(),
+        Some(ref s) if s == "kernel" => mount_kernel(),
         Some(ref s) if s == "extra" => mount_extra(),
         _ => Err(format_err!("Bad or missing argument")),
     };
@@ -59,9 +59,9 @@ fn mount_rootfs() -> Result<()> {
     rootfs.setup()
 }
 
-fn mount_modules() -> Result<()> {
-    info!("citadel-mount modules");
-    let mut image = ResourceImage::find("modules")?;
+fn mount_kernel() -> Result<()> {
+    info!("citadel-mount kernel");
+    let mut image = ResourceImage::find("kernel")?;
     image.mount()?;
     Ok(())
 }

@@ -176,6 +176,9 @@ impl UpdateBuilder {
         if let Some(kv) = self.config.kernel_version() {
             writeln!(v, "kernel-version = \"{}\"", kv)?;
         }
+        if let Some(kid) = self.config.kernel_id() {
+            writeln!(v, "kernel-id = \"{}\"", kid)?;
+        }
         writeln!(v, "channel = \"{}\"", self.config.channel())?;
         writeln!(v, "version = {}", self.config.version())?;
         writeln!(v, "nblocks = {}", self.nblocks.unwrap())?;
