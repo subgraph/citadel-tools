@@ -57,7 +57,13 @@ fn main() {
             .about("Decompress a compressed image file")
             .arg(Arg::with_name("path")
                 .required(true)
-                .help("Path to image file")));
+                .help("Path to image file")))
+
+    .subcommand(SubCommand::with_name("verify-shasum")
+        .about("Verify the sha256 sum of the image")
+        .arg(Arg::with_name("path")
+            .required(true)
+            .help("Path to image file")));
 
     set_verbose(true);
     let matches = app.get_matches();
@@ -70,6 +76,7 @@ fn main() {
         ("sign-image", Some(m)) => sign_image(m),
         ("genkeys", Some(_)) => genkeys(),
         ("decompress", Some(m)) => decompress(m),
+        ("verify-shasum", Some(m)) => verify_shasum(m),
         ("install-rootfs", Some(m)) => install_rootfs(m),
         _ => Ok(()),
     };
@@ -115,6 +122,19 @@ fn verify(arg_matches: &ArgMatches) -> Result<()> {
     Ok(())
 }
 
+fn verify_shasum(arg_matches: &ArgMatches) -> Result<()> {
+    let img = load_image(arg_matches)?;
+    let shasum = img.generate_shasum()?;
+    if shasum == img.metainfo().shasum() {
+        info!("Image has correct sha256sum: {}", shasum);
+    } else {
+        info!("Image sha256 sum does not match metainfo:");
+        info!("     image: {}", shasum);
+        info!("  metainfo: {}", img.metainfo().shasum())
+    }
+    Ok(())
+}
+
 fn load_image(arg_matches: &ArgMatches) -> Result<ResourceImage> {
     let path = arg_matches.value_of("path").expect("path argument missing");
     if !Path::new(path).exists() {
@@ -129,7 +149,13 @@ fn load_image(arg_matches: &ArgMatches) -> Result<ResourceImage> {
 
 fn install_rootfs(arg_matches: &ArgMatches) -> Result<()> {
     let img = load_image(arg_matches)?;
-    let partition =choose_install_partition()?;
+    img.header().verify_signature()?;
+    let shasum = img.generate_shasum()?;
+    if shasum != img.metainfo().shasum() {
+        bail!("image file does not have expected sha256 value");
+    }
+
+    let partition = choose_install_partition()?;
     img.write_to_partition(&partition)?;
     Ok(())
 }
@@ -142,7 +168,7 @@ fn sign_image(arg_matches: &ArgMatches) -> Result<()> {
 
 fn genkeys() -> Result<()> {
     let keypair = KeyPair::generate()?;
-    println!("public-key = \"{}\"", keypair.public_key_hex());
+    println!("public-key = \"{}\"", keypair.public_key().to_hex());
     println!("private-key = \"{}\"", keypair.private_key_hex());
     Ok(())
 }

@@ -100,11 +100,11 @@ impl ResourceImage {
         }
     }
 
-    pub fn mount(&mut self, config: &Config) -> Result<()> {
+    pub fn mount(&mut self) -> Result<()> {
         if CommandLine::noverity() {
             self.mount_noverity()?;
         } else {
-            self.mount_verity(config)?;
+            self.mount_verity()?;
         }
 
         self.process_manifest_file()
@@ -122,32 +122,32 @@ impl ResourceImage {
         if !self.is_compressed() {
             return Ok(())
         }
-        self.decompress_and_generate_hashtree(true)
-    }
 
-    // Avoid copying the body twice in the common case that image is both
-    // compressed and needs hashtree generated.
-    fn decompress_and_generate_hashtree(&self, decompress_only: bool) -> Result<()> {
-        assert!(self.is_compressed());
-        let mut tmpfile = self.extract_body_to_tmpfile(Some("xz"))?;
-        util::xz_decompress(&tmpfile)?;
-        tmpfile.set_extension("");
+        let tmpfile = self.extract_body_to_tmpfile()?;
+        let decompressed = self.decompress_tmpfile(tmpfile)?;
         self.header.clear_flag(ImageHeader::FLAG_DATA_COMPRESSED);
-
-        if !decompress_only && !self.has_verity_hashtree() {
-            verity::generate_image_hashtree(&tmpfile, &self.metainfo)?;
-            self.header.set_flag(ImageHeader::FLAG_HASH_TREE);
-        }
-        self.write_image_from_tmpfile(&tmpfile)
+        self.write_image_from_tmpfile(&decompressed)?;
+        Ok(())
     }
 
-    fn extract_body_to_tmpfile(&self, extension: Option<&str>) -> Result<PathBuf> {
+    fn decompress_tmpfile(&self, tmpfile: PathBuf) -> Result<PathBuf> {
+        info!("Decompressing image contents");
+        if !self.is_compressed() {
+            return Ok(tmpfile);
+        }
+        util::xz_decompress(&tmpfile)?;
+        let mut new_tmpfile = PathBuf::from(tmpfile);
+        new_tmpfile.set_extension("");
+        Ok(new_tmpfile)
+    }
+
+    fn extract_body_to_tmpfile(&self) -> Result<PathBuf> {
         let mut reader = File::open(&self.path)?;
         reader.seek(SeekFrom::Start(4096))?;
         fs::create_dir_all("/tmp/citadel-image-tmp")?;
         let mut path = Path::new("/tmp/citadel-image-tmp").join(format!("{}-tmp", &self.metainfo.image_type()));
-        if let Some(ext) = extension {
-            path.set_extension(ext);
+        if self.is_compressed() {
+            path.set_extension("xz");
         }
         let mut out = File::create(&path)?;
         io::copy(&mut reader, &mut out)?;
@@ -166,7 +166,7 @@ impl ResourceImage {
         info!("writing rootfs image to {}", partition.path().display());
         let args = format!("if={} of={} bs=4096 skip=1",
                            self.path.display(), partition.path().display());
-        util::exec_cmdline("/bin/dd", args)?;
+        util::exec_cmdline_quiet("/bin/dd", args)?;
 
         self.header.set_status(ImageHeader::STATUS_NEW);
         self.header.write_partition(partition.path())?;
@@ -196,7 +196,8 @@ impl ResourceImage {
 
     pub fn setup_verity_device(&self) -> Result<PathBuf> {
         if !CommandLine::nosignatures() {
-            self.header.verify_signature(config)?;
+            self.header.verify_signature()?;
+            info!("Image signature is valid for channel {}", self.metainfo.channel());
         }
         info!("Setting up dm-verity device for image");
         if !self.has_verity_hashtree() {
@@ -210,26 +211,44 @@ impl ResourceImage {
             return Ok(())
         }
         info!("Generating dm-verity hash tree for image {}", self.path.display());
+        let mut tmp = self.extract_body_to_tmpfile()?;
         if self.is_compressed() {
-            info!("Image is compressed, so need to decompress first");
-            self.decompress_and_generate_hashtree(false)
-        } else {
-            let tmpfile = self.extract_body_to_tmpfile(None)?;
-            verity::generate_image_hashtree(&tmpfile, &self.metainfo)?;
-            self.header.set_flag(ImageHeader::FLAG_HASH_TREE);
-            self.write_image_from_tmpfile(&tmpfile)
+            tmp = self.decompress_tmpfile(tmp)?;
+            self.header.clear_flag(ImageHeader::FLAG_DATA_COMPRESSED);
         }
+
+        verity::generate_image_hashtree(&tmp, self.metainfo())?;
+        self.header.set_flag(ImageHeader::FLAG_HASH_TREE);
+        self.write_image_from_tmpfile(&tmp)?;
+        Ok(())
     }
 
     pub fn verify_verity(&self) -> Result<bool> {
         if !self.has_verity_hashtree() {
             self.generate_verity_hashtree()?;
         }
-        verity::verify_image(self.path(), &self.metainfo)
+        info!("Verifying dm-verity hash tree");
+        let tmp = self.extract_body_to_tmpfile()?;
+        let ok = verity::verify_image(&tmp, &self.metainfo)?;
+        fs::remove_file(tmp)?;
+        Ok(ok)
     }
 
-    pub fn verify_shasum(&self) -> Result<bool> {
-        unimplemented!();
+    pub fn generate_shasum(&self) -> Result<String> {
+        let mut tmp = self.extract_body_to_tmpfile()?;
+        if self.is_compressed() {
+            tmp = self.decompress_tmpfile(tmp)?;
+        }
+        info!("Calculating sha256 of image");
+        if self.has_verity_hashtree() {
+            let args = format!("if={} of={}.shainput bs=4096 count={}", tmp.display(), tmp.display(), self.metainfo.nblocks());
+            util::exec_cmdline_quiet("/bin/dd", args)?;
+            fs::remove_file(&tmp)?;
+            tmp.set_extension("shainput");
+        }
+        let shasum = util::sha256(&tmp)?;
+        fs::remove_file(tmp)?;
+        Ok(shasum)
     }
 
     // Mount the resource image but use a simple loop mount rather than setting up a dm-verity
