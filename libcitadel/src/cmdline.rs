@@ -60,6 +60,36 @@ impl CommandLine {
         CommandLine::var_exists("citadel.recovery")
     }
 
+    pub fn channel() -> Option<&'static str> {
+        CommandLine::get_value("citadel.channel")
+    }
+
+    fn _channel() -> Option<(&'static str,Option<&'static str>)> {
+        if let Some(channel) = CommandLine::channel() {
+            let parts = channel.splitn(2, ":").collect::<Vec<_>>();
+            if parts.len() == 2 {
+                return Some((parts[0], Some(parts[1])))
+            }
+            return Some((channel, None));
+        }
+        None
+
+    }
+
+    pub fn channel_name() -> Option<&'static str> {
+        if let Some((name, _)) = CommandLine::_channel() {
+            return Some(name)
+        }
+        None
+    }
+
+    pub fn channel_pubkey() -> Option<&'static str> {
+        if let Some((_, pubkey)) = CommandLine::_channel() {
+            return pubkey
+        }
+        None
+    }
+
     pub fn verbose() -> bool {
         CommandLine::var_exists("citadel.verbose")
     }
