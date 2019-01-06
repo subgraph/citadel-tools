@@ -60,6 +60,8 @@ impl CommandLine {
         CommandLine::var_exists("citadel.recovery")
     }
 
+    pub fn overlay() -> bool { CommandLine::var_exists("citadel.overlay") }
+
     pub fn channel() -> Option<&'static str> {
         CommandLine::get_value("citadel.channel")
     }
