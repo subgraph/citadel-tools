@@ -1,127 +1,105 @@
-use std::path::{Path,PathBuf};
+use std::path::Path;
 use std::collections::HashMap;
 use std::fs;
 
-use rustc_serialize::hex::FromHex;
-use toml;
-
 use Result;
-use keys::{KeyPair,PublicKey,Signature};
 
-
-const DEFAULT_CONFIG_PATH: &str = "/usr/share/citadel/citadel-image.conf";
-
-#[derive(Deserialize)]
-pub struct Config {
-
-    #[serde (rename="default-channel")]
-    default_channel: Option<String>,
-
-    #[serde (rename="default-citadel-base")]
-    default_citadel_base: Option<String>,
-
-    channel: HashMap<String, Channel>,
+lazy_static! {
+    static ref OS_RELEASE: Option<OsRelease> = match OsRelease::load() {
+        Ok(osr) => Some(osr),
+        Err(err) => {
+            warn!("Failed to load os-release file: {}", err);
+            None
+        },
+    };
 }
 
-impl Config {
+pub struct OsRelease {
+    vars: HashMap<String,String>,
+}
 
-    pub fn load_default() -> Result<Config> {
-        Config::load(DEFAULT_CONFIG_PATH)
-    }
-
-    pub fn load<P: AsRef<Path>>(path: P) -> Result<Config> {
-        let config = match Config::from_path(path.as_ref()) {
-            Ok(config) => config,
-            Err(e) => bail!("Failed to load config file {}: {}", path.as_ref().display(), e),
-        };
-        Ok(config)
-    }
-
-    fn from_path(path: &Path) -> Result<Config> {
-        let s = fs::read_to_string(path)?;
-        let mut config = toml::from_str::<Config>(&s)?;
-        for (k,v) in config.channel.iter_mut() {
-            v.name = k.to_string();
-        }
-            
-        Ok(config)
-    }
-
-
-    pub fn get_default_citadel_base(&self) -> Option<PathBuf> {
-        match self.default_citadel_base {
-            Some(ref base) => Some(PathBuf::from(base)),
-            None => None,
-        }
-    }
-
-    pub fn get_default_channel(&self) -> Option<Channel> {
-        
-        if let Some(ref name) = self.default_channel {
-            if let Some(c) = self.channel(name) {
-                return Some(c);
+impl OsRelease {
+    fn load() -> Result<OsRelease> {
+        for file in &["/etc/os-release", "/sysroot/etc/os-release", "/etc/initrd-release"] {
+            let path = Path::new(file);
+            if path.exists() {
+                return OsRelease::load_file(path);
             }
         }
-        
-        if self.channel.len() == 1 {
-            return self.channel.values().next().map(|c| c.clone());
+        Err(format_err!("File not found"))
+    }
+
+    fn load_file(path: &Path) -> Result<OsRelease> {
+        let mut vars = HashMap::new();
+        for line in fs::read_to_string(path)?.lines() {
+            let (k,v) = OsRelease::parse_line(line)?;
+            vars.insert(k,v);
         }
-        None
+        Ok(OsRelease{vars})
     }
 
-    pub fn channel(&self, name: &str) -> Option<Channel> {
-        self.channel.get(name).map(|c| c.clone() )
+    fn parse_line(line: &str) -> Result<(String,String)> {
+        let parts: Vec<&str> = line.splitn(2, '=').collect();
+        if parts.len() != 2 {
+
+        }
+        let key = parts[0].trim().to_string();
+        let val = OsRelease::remove_quotes(parts[1].trim())?;
+        Ok((key,val))
     }
 
-    pub fn get_private_key(&self, channel: &str) -> Option<String> {
-        if let Some(channel_config) = self.channel.get(channel) {
-            if let Some(ref key) = channel_config.keypair {
-                return Some(key.clone());
+    fn remove_quotes(s: &str) -> Result<String> {
+        for q in &["'", "\""] {
+            if s.starts_with(q) {
+                if !s.ends_with(q) || s.len() < 2 {
+                    bail!("Unmatched quote character");
+                }
+                return Ok(s[1..s.len() - 1].to_string());
+            }
+        }
+        Ok(s.to_string())
+    }
+
+    pub fn get_value(key: &str) -> Option<&str> {
+        if let Some(ref osr) = *OS_RELEASE {
+            osr._get_value(key)
+        } else {
+            None
+        }
+    }
+
+    pub fn get_int_value(key: &str) -> Option<usize> {
+        if let Some(ref osr) = *OS_RELEASE {
+            osr._get_int_value(key)
+        } else {
+            None
+        }
+    }
+
+    pub fn citadel_channel() -> Option<&'static str> {
+        OsRelease::get_value("CITADEL_CHANNEL")
+    }
+
+    pub fn citadel_image_pubkey() -> Option<&'static str> {
+        OsRelease::get_value("CITADEL_IMAGE_PUBKEY")
+    }
+
+    pub fn citadel_rootfs_version() -> Option<usize> {
+        OsRelease::get_int_value("CITADEL_ROOTFS_VERSION")
+    }
+
+    fn _get_value(&self, key: &str) -> Option<&str> {
+        self.vars.get(key).map(|v| v.as_str())
+    }
+    pub fn _get_int_value(&self, key: &str) -> Option<usize> {
+        if let Some(s) = self._get_value(key) {
+            match s.parse::<usize>() {
+                Ok(n) => return Some(n),
+                _ => {
+                    warn!("Could not parse value '{}' for key {}", s, key);
+                },
             }
         }
         None
     }
-
-    pub fn get_public_key(&self, channel: &str) -> Option<String> {
-        if let Some(channel_config) = self.channel.get(channel) {
-            return Some(channel_config.pubkey.clone());
-        }
-        None
-    }
 }
-
-#[derive(Deserialize,Clone)]
-pub struct Channel {
-    update_server: Option<String>,
-    pubkey: String,
-    keypair: Option<String>,
-
-    #[serde(skip)]
-    name: String,
-}
-
-impl Channel {
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
-    pub fn sign(&self, data: &[u8]) -> Result<Signature> {
-        let keybytes = match self.keypair {
-            Some(ref hex) => hex,
-            None => bail!("No private signing key available for channel {}", self.name),
-        };
-        
-        let privkey = KeyPair::from_hex(keybytes)?;
-        let sig = privkey.sign(data)?;
-        Ok(sig)
-    }
-
-    pub fn verify(&self, data: &[u8], sigbytes: &[u8]) -> Result<()> {
-        let keybytes = self.pubkey.from_hex()?;
-        let pubkey = PublicKey::from_bytes(&keybytes)?;
-        pubkey.verify(data, sigbytes)?;
-        Ok(())
-    }
-
-}
-
