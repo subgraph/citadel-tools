@@ -1,5 +1,5 @@
 
-use libcitadel::{Config,Partition,Result,ImageHeader};
+use libcitadel::{Partition,Result,ImageHeader};
 
 pub struct BootSelection {
     partitions: Vec<Partition>,
@@ -62,9 +62,9 @@ impl BootSelection {
 
 
     /// Perform checks for error states at boot time.
-    pub fn scan_boot_partitions(&mut self, config: &Config) -> Result<()> {
+    pub fn scan_boot_partitions(&mut self) -> Result<()> {
         for mut p in &mut self.partitions {
-            if let Err(e) = boot_scan_partition(&mut p, config) {
+            if let Err(e) = boot_scan_partition(&mut p) {
                 warn!("error in bootscan of partition {}: {}", p.path().display(), e);
             }
         }
@@ -82,7 +82,7 @@ impl BootSelection {
 /// Verify metainfo signature and mark `STATUS_BAD_SIG` if
 /// signature verification fails.
 ///
-fn boot_scan_partition(p: &mut Partition, config: &Config) -> Result<()> {
+fn boot_scan_partition(p: &mut Partition) -> Result<()> {
     if !p.is_initialized() {
         return Ok(())
     }
@@ -90,9 +90,7 @@ fn boot_scan_partition(p: &mut Partition, config: &Config) -> Result<()> {
         warn!("Partition {} has STATUS_TRY_BOOT, assuming it failed boot attempt and marking STATUS_FAILED", p.path().display());
         p.write_status(ImageHeader::STATUS_FAILED)?;
     }
-    let signature = p.header().signature();
-    p.metainfo().verify(config, &signature)?;
-    
+    p.header().verify_signature()?;
     Ok(())
 }
 

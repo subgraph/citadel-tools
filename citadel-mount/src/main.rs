@@ -6,7 +6,7 @@ extern crate libc;
 use std::process::exit;
 use std::env;
 
-use libcitadel::{Result,Config,CommandLine,set_verbose,format_error,ResourceImage};
+use libcitadel::{Result,CommandLine,set_verbose,format_error,ResourceImage};
 
 
 mod boot_select;
@@ -38,20 +38,12 @@ fn main() {
         set_verbose(true);
     }
 
-    let config = match Config::load_default() {
-        Ok(config) => config,
-        Err(err) => {
-            warn!("{}", err);
-            exit(1);
-        },
-    };
-
     let mut args = env::args();
     args.next();
     let result = match args.next() {
-        Some(ref s) if s == "rootfs" => mount_rootfs(config),
-        Some(ref s) if s == "modules" => mount_modules(config),
-        Some(ref s) if s == "extra" => mount_extra(config),
+        Some(ref s) if s == "rootfs" => mount_rootfs(),
+        Some(ref s) if s == "modules" => mount_modules(),
+        Some(ref s) if s == "extra" => mount_extra(),
         _ => Err(format_err!("Bad or missing argument")),
     };
 
@@ -61,22 +53,22 @@ fn main() {
     }
 }
 
-fn mount_rootfs(config: Config) -> Result<()> {
+fn mount_rootfs() -> Result<()> {
     info!("citadel-mount rootfs");
-    let rootfs = Rootfs::new(config);
+    let rootfs = Rootfs::new();
     rootfs.setup()
 }
 
-fn mount_modules(config: Config) -> Result<()> {
+fn mount_modules() -> Result<()> {
     info!("citadel-mount modules");
     let mut image = ResourceImage::find("modules")?;
-    image.mount(&config)?;
+    image.mount()?;
     Ok(())
 }
 
-fn mount_extra(config: Config) -> Result<()> {
+fn mount_extra() -> Result<()> {
     info!("citadel-mount extra");
     let mut image = ResourceImage::find("extra")?;
-    image.mount(&config)?;
+    image.mount()?;
     Ok(())
 }

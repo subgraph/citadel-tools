@@ -3,7 +3,7 @@ use std::ffi::OsStr;
 use std::io::{self,Seek,SeekFrom};
 use std::path::{Path, PathBuf};
 
-use {CommandLine,Config,ImageHeader,MetaInfo,Result,Partition,Mount,verity,util};
+use {CommandLine,ImageHeader,MetaInfo,Result,Partition,Mount,verity,util};
 
 use failure::ResultExt;
 
@@ -183,8 +183,8 @@ impl ResourceImage {
         Ok(())
     }
 
-    fn mount_verity(&self, config: &Config) -> Result<()> {
-        let verity_dev = self.setup_verity_device(config)?;
+    fn mount_verity(&self) -> Result<()> {
+        let verity_dev = self.setup_verity_device()?;
 
         info!("Mounting dm-verity device to {}", self.mount_path().display());
 
@@ -194,7 +194,7 @@ impl ResourceImage {
 
     }
 
-    pub fn setup_verity_device(&self, config: &Config) -> Result<PathBuf> {
+    pub fn setup_verity_device(&self) -> Result<PathBuf> {
         if !CommandLine::nosignatures() {
             self.header.verify_signature(config)?;
         }

@@ -1,6 +1,6 @@
 use std::path::{Path,PathBuf};
 use std::fs;
-use {Config,CommandLine,Result,ImageHeader,MetaInfo,Mount};
+use {CommandLine,Result,ImageHeader,MetaInfo,Mount};
 
 #[derive(Clone)]
 pub struct Partition {
@@ -109,7 +109,7 @@ impl Partition {
     /// Verify metainfo signature and mark `STATUS_BAD_SIG` if
     /// signature verification fails.
     ///
-    pub fn boot_scan(&mut self, config: &Config) -> Result<()> {
+    pub fn boot_scan(&mut self) -> Result<()> {
         if !self.is_initialized() {
             return Ok(())
         }
@@ -118,7 +118,7 @@ impl Partition {
         }
 
         if !CommandLine::nosignatures() {
-            if let Err(e) = self.header().verify_signature(config) {
+            if let Err(e) = self.header().verify_signature() {
                 warn!("Signature verification failed on partition: {}", e);
                 self.write_status(ImageHeader::STATUS_BAD_SIG)?;
             }
