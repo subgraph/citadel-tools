@@ -4,7 +4,7 @@ use std::fs::{self,File};
 use std::io::{self,Write};
 
 use failure::ResultExt;
-use libcitadel::{Result,ImageHeader,util,verity};
+use libcitadel::{Result,ImageHeader,verity,util,devkeys};
 
 use BuildConfig;
 
@@ -85,7 +85,10 @@ impl UpdateBuilder {
     }
 
     fn calculate_shasum(&mut self) -> Result<()> {
-        let shasum = util::sha256(&self.target)?;
+        let output = util::exec_cmdline_with_output("sha256sum", format!("{}", self.target.display()))
+            .context(format!("failed to calculate sha256 on {}", self.target.display()))?;
+        let v: Vec<&str> = output.split_whitespace().collect();
+        let shasum = v[0].trim().to_owned();
         info!("Sha256 of image data is {}", shasum);
         self.shasum = Some(shasum);
         Ok(())
@@ -96,7 +99,6 @@ impl UpdateBuilder {
         let outfile = self.config.workdir_path("verity-format.out");
 
         let verity = verity::generate_initial_hashtree(&self.target, &hashfile)?;
-
 
         fs::write(outfile, verity.output())
             .context("failed to write veritysetup command output to a file")?;
@@ -122,7 +124,9 @@ impl UpdateBuilder {
 
     fn compress_image(&self) -> Result<()> {
         info!("Compressing image data");
-        util::xz_compress(&self.target)
+        util::exec_cmdline("xz", format!("-T0 {}", self.target.display()))
+            .context(format!("failed to decompress {}", self.target.display()))?;
+        Ok(())
     }
 
     fn write_final_image(&self) -> Result<()> {
