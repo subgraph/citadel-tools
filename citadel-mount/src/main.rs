@@ -27,9 +27,6 @@ use rootfs::Rootfs;
 /// 'kernel' mounts a resource bundle containing kernel modules
 /// 'extra' mounts a resource bundle containing extra files
 ///
-/// 'copy-artifacts' searches for a boot partition containing an /images
-/// directory and copies all image files to /run/images.  Also, it
-/// copies bzImage and EFI/BOOT/bootx64.efi
 ///
 
 fn main() {
