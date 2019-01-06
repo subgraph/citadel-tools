@@ -1,19 +1,35 @@
-use std::path::Path;
+use std::path::{Path,PathBuf};
 use std::process::{Command,ExitStatus,Stdio};
 use std::mem;
 use libc::{self, c_char};
 use std::ffi::CStr;
 use std::str::from_utf8_unchecked;
+use std::env;
 
 use failure::ResultExt;
 
 use Result;
 
-pub fn ensure_command_exists(cmd_path: &str) -> Result<()> {
-    if !Path::new(cmd_path).exists() {
-        bail!("Cannot execute '{}': command does not exist", cmd_path);
+fn search_path(filename: &str) -> Result<PathBuf> {
+    let path_var = env::var("PATH")?;
+    for mut path in env::split_paths(&path_var) {
+        path.push(filename);
+        if path.exists() {
+            return Ok(path);
+        }
     }
-    Ok(())
+    Err(format_err!("Could not find {} in $PATH", filename))
+}
+
+pub fn ensure_command_exists(cmd: &str) -> Result<()> {
+    let path = Path::new(cmd);
+    if !path.is_absolute() {
+        search_path(cmd)?;
+        return Ok(())
+    } else if path.exists() {
+        return Ok(())
+    }
+    Err(format_err!("Cannot execute '{}': command does not exist", cmd))
 }
 
 pub fn exec_cmdline<S: AsRef<str>>(cmd_path: &str, args: S) -> Result<()> {
