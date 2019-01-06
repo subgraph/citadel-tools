@@ -12,10 +12,12 @@ const LOSETUP: &str = "/sbin/losetup";
 /// Parse output from veritysetup command and return as `VerityOutput`.
 pub fn generate_initial_hashtree<P: AsRef<Path>, Q:AsRef<Path>>(source: P, hashtree: Q) -> Result<VerityOutput> {
     let args = format!("format {} {}", source.as_ref().display(), hashtree.as_ref().display());
-    let output = util::exec_cmdline_with_output(VERITYSETUP, args)
+    // Don't use absolute path to veritysetup so that the build will correctly find the version from cryptsetup-native
+    let output = util::exec_cmdline_with_output("veritysetup", args)
         .context("creating initial hashtree with veritysetup format failed")?;
     Ok(VerityOutput::parse(&output))
 }
+
 
 pub fn generate_image_hashtree<P: AsRef<Path>>(image: P, metainfo: &MetaInfo) -> Result<VerityOutput> {
     let args = format!("--hash-offset={} --data-blocks={} --salt={} format {} {}",
