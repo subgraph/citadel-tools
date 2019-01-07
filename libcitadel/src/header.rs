@@ -297,6 +297,7 @@ struct MetaInfoToml {
     #[serde(rename = "kernel-id")]
     kernel_id: Option<String>,
     version: u32,
+    timestamp: String,
     #[serde(rename = "base-version")]
     base_version: Option<u32>,
     date: Option<String>,
@@ -346,6 +347,10 @@ impl MetaInfo {
 
     pub fn version(&self) -> u32 {
         self.toml().version
+    }
+
+    pub fn timestamp(&self) -> &str {
+        &self.toml().timestamp
     }
 
     pub fn date(&self) -> Option<&str> {

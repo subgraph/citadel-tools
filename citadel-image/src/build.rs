@@ -181,6 +181,7 @@ impl UpdateBuilder {
         }
         writeln!(v, "channel = \"{}\"", self.config.channel())?;
         writeln!(v, "version = {}", self.config.version())?;
+        writeln!(v, "timestamp = \"{}\"", self.config.timestamp())?;
         writeln!(v, "nblocks = {}", self.nblocks.unwrap())?;
         writeln!(v, "shasum = \"{}\"", self.shasum.as_ref().unwrap())?;
         writeln!(v, "verity-salt = \"{}\"", self.verity_salt.as_ref().unwrap())?;

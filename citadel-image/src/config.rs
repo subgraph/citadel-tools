@@ -12,6 +12,7 @@ pub struct BuildConfig {
     image_type: String,
     channel: String,
     version: usize,
+    timestamp: String,
     source: String,
     #[serde(rename = "kernel-version")]
     kernel_version: Option<String>,
@@ -75,6 +76,8 @@ impl BuildConfig {
 
         Ok(())
     }
+
+    pub fn timestamp(&self) -> &str { &self.timestamp }
 
     pub fn source(&self) -> &Path {
         &self.src_path
