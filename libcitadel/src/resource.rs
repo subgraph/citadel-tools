@@ -414,15 +414,23 @@ fn compare_images(a: Option<ResourceImage>, b: ResourceImage) -> Result<Resource
     } else if ver_b > ver_a {
         Ok(b)
     } else {
-        // versions are the same so compare file times
-        let a_time = a.path().metadata()?.created()?;
-        let b_time = b.path().metadata()?.created()?;
-        if a_time > b_time {
+        // versions are the same so compare build timestamps
+        let ts_a = parse_timestamp(&a)?;
+        let ts_b = parse_timestamp(&b)?;
+        if ts_a > ts_b {
             Ok(a)
         } else {
             Ok(b)
         }
     }
+}
+
+fn parse_timestamp(img: &ResourceImage) -> Result<usize> {
+    let ts = img.metainfo()
+        .timestamp()
+        .parse::<usize>()
+        .context(format!("Error parsing timestamp for resource image {}", img.path().display()))?;
+    Ok(ts)
 }
 
 fn current_kernel_version() -> String {
