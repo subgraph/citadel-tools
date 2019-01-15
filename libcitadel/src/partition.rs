@@ -22,6 +22,7 @@ impl Partition {
             let partition = Partition::load(&path)?;
             v.push(partition);
         }
+        v.sort_unstable_by(|a,b| a.path().cmp(b.path()));
         Ok(v)
     }
 
