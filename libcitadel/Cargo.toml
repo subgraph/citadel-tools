@@ -6,7 +6,7 @@ authors = ["Bruce Leidl <bruce@subgraph.com>"]
 [dependencies]
 libc = "0.2"
 nix = "0.12.0"
-ring = "=0.13.2"
+ring = "0.13.5"
 untrusted = "0.6.2"
 failure = "0.1.3"
 toml = "0.4.10"
