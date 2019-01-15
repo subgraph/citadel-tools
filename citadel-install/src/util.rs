@@ -7,6 +7,7 @@ use std::fs;
 
 use libc::{self, c_char};
 use failure::ResultExt;
+use libcitadel::OsRelease;
 
 use super::Result;
 
@@ -109,12 +110,10 @@ impl Disk {
 
 }
 
-pub fn read_rootfs_channel() -> Result<String> {
-    let s = fs::read_to_string("/etc/citadel-channel")
-        .context("Failed to open /etc/citadel-channel")?;
-    match s.split_whitespace().next() {
-        Some(s) => Ok(s.to_owned()),
-        None => Err(format_err!("Failed to parse /etc/citadel-channel contents")),
+pub fn rootfs_channel() -> &'static str {
+    match OsRelease::citadel_channel() {
+        Some(channel) => channel,
+        None => "dev",
     }
 }
 

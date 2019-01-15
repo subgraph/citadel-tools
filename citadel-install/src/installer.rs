@@ -365,7 +365,7 @@ impl Installer {
     }
 
     fn setup_storage_resources(&self, base: &Path) -> Result<()> {
-        let channel = util::read_rootfs_channel()?;
+        let channel = util::rootfs_channel();
         let resources = base.join("resources").join(channel);
         fs::create_dir_all(&resources)?;
 

@@ -38,7 +38,7 @@ impl ResourceImage {
     /// First the /run/images directory is searched, and if not found there,
     /// the image will be searched for in /storage/resources/$channel
     pub fn find(image_type: &str) -> Result<ResourceImage> {
-        let channel = ResourceImage::read_rootfs_channel()?;
+        let channel = ResourceImage::rootfs_channel();
 
         info!("Searching run directory for image {} with channel {}", image_type, channel);
 
@@ -347,19 +347,10 @@ impl ResourceImage {
         Ok(true)
     }
 
-    fn read_rootfs_channel() -> Result<String> {
-        let channel_file = if Path::new("/etc/initrd-release").exists() {
-            "/sysroot/etc/citadel-channel"
-        } else {
-            "/etc/citadel-channel"
-        };
-
-        let s = fs::read_to_string(channel_file)
-            .context(format!("Failed to open {}", channel_file))?;
-
-        match s.split_whitespace().next() {
-            Some(s) => Ok(s.to_owned()),
-            None => Err(format_err!("Failed to parse /sysroot/etc/citadel-channel contents")),
+    fn rootfs_channel() -> &'static str {
+        match CommandLine::channel_name() {
+            Some(channel) => channel,
+            None => "dev",
         }
     }
 }
