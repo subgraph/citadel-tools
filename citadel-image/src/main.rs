@@ -46,8 +46,14 @@ fn main() {
 
         .subcommand(SubCommand::with_name("install-rootfs")
             .about("Install rootfs image file to a partition")
+            .arg(Arg::with_name("choose")
+                .long("just-choose")
+                .help("Don't install anything, just show which partition would be chosen"))
+            .arg(Arg::with_name("skip-sha")
+                .long("skip-sha")
+                .help("Skip verification of header sha256 value"))
             .arg(Arg::with_name("path")
-                .required(true)
+                .required_unless("choose")
                 .help("Path to image file")))
 
         .subcommand(SubCommand::with_name("genkeys")
@@ -148,14 +154,22 @@ fn load_image(arg_matches: &ArgMatches) -> Result<ResourceImage> {
 }
 
 fn install_rootfs(arg_matches: &ArgMatches) -> Result<()> {
-    let img = load_image(arg_matches)?;
-    img.header().verify_signature()?;
-    let shasum = img.generate_shasum()?;
-    if shasum != img.metainfo().shasum() {
-        bail!("image file does not have expected sha256 value");
+    if arg_matches.is_present("choose") {
+        let _ = choose_install_partition(true)?;
+        return Ok(())
     }
 
-    let partition = choose_install_partition()?;
+    let img = load_image(arg_matches)?;
+    img.header().verify_signature()?;
+
+    if !arg_matches.is_present("skip-sha") {
+        let shasum = img.generate_shasum()?;
+        if shasum != img.metainfo().shasum() {
+            bail!("image file does not have expected sha256 value");
+        }
+    }
+
+    let partition = choose_install_partition(true)?;
     img.write_to_partition(&partition)?;
     Ok(())
 }
@@ -183,15 +197,41 @@ fn decompress(arg_matches: &ArgMatches) -> Result<()> {
     Ok(())
 }
 
-fn choose_install_partition() -> Result<Partition> {
+fn bool_to_yesno(val: bool) -> &'static str {
+    if val {
+        "YES"
+    } else {
+        " NO"
+    }
+}
+
+fn choose_install_partition(verbose: bool) -> Result<Partition> {
     let partitions = Partition::rootfs_partitions()?;
+
+    if verbose {
+        for p in &partitions {
+            info!("Partition: {}  (Mounted: {}) (Empty: {})",
+                     p.path().display(),
+                     bool_to_yesno(p.is_mounted()),
+                     bool_to_yesno(!p.is_initialized()));
+        }
+    }
+
     for p in &partitions {
         if !p.is_mounted() && !p.is_initialized() {
+            if verbose {
+                info!("Choosing {} because it is empty and not mounted", p.path().display());
+            }
             return Ok(p.clone())
         }
     }
     for p in &partitions {
         if !p.is_mounted() {
+            if verbose {
+                info!("Choosing {} because it is not mounted", p.path().display());
+                info!("Header metainfo:");
+                print!("{}",String::from_utf8(p.header().metainfo_bytes())?);
+            }
             return Ok(p.clone())
         }
     }
