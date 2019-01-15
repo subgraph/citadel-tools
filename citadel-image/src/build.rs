@@ -10,7 +10,7 @@ use BuildConfig;
 
 pub struct UpdateBuilder {
     config: BuildConfig,
-    target: PathBuf,
+    image_data: PathBuf,
 
     nblocks: Option<usize>,
     shasum: Option<String>,
@@ -29,9 +29,9 @@ impl UpdateBuilder {
 
     pub fn new(config: BuildConfig) -> UpdateBuilder {
         let filename = UpdateBuilder::target_filename(&config);
-        let target = config.workdir_path(&filename);
+        let image_data= config.workdir_path(&filename);
         UpdateBuilder {
-            config, target,
+            config, image_data,
             nblocks: None, shasum: None, verity_salt: None,
             verity_root: None,
         }
@@ -42,8 +42,8 @@ impl UpdateBuilder {
     }
 
     pub fn build(&mut self) -> Result<()> {
-        info!("Copying source file to {}", self.target.display());
-        fs::copy(self.config.source(), &self.target)?;
+        info!("Copying source file to {}", self.image_data.display());
+        fs::copy(self.config.source(), &self.image_data)?;
 
         self.pad_image()
             .context("failed writing padding to image")?;
@@ -61,7 +61,7 @@ impl UpdateBuilder {
     }
 
     fn pad_image(&mut self) -> Result<()> {
-        let meta = self.target.metadata()?;
+        let meta = self.image_data.metadata()?;
         let len = meta.len() as usize;
         if len % 512 != 0 {
             bail!("Image file size is not a multiple of sector size (512 bytes)");
@@ -73,7 +73,7 @@ impl UpdateBuilder {
             let zeros = vec![0u8; padlen];
             let mut file = OpenOptions::new()
                 .append(true)
-                .open(&self.target)?;
+                .open(&self.image_data)?;
             file.write_all(&zeros)?;
         }
 
@@ -85,8 +85,8 @@ impl UpdateBuilder {
     }
 
     fn calculate_shasum(&mut self) -> Result<()> {
-        let output = util::exec_cmdline_with_output("sha256sum", format!("{}", self.target.display()))
-            .context(format!("failed to calculate sha256 on {}", self.target.display()))?;
+        let output = util::exec_cmdline_with_output("sha256sum", format!("{}", self.image_data.display()))
+            .context(format!("failed to calculate sha256 on {}", self.image_data.display()))?;
         let v: Vec<&str> = output.split_whitespace().collect();
         let shasum = v[0].trim().to_owned();
         info!("Sha256 of image data is {}", shasum);
@@ -98,7 +98,7 @@ impl UpdateBuilder {
         let hashfile = self.config.workdir_path(&format!("verity-hash-{}-{:03}", self.config.image_type(), self.config.version()));
         let outfile = self.config.workdir_path("verity-format.out");
 
-        let verity = verity::generate_initial_hashtree(&self.target, &hashfile)?;
+        let verity = verity::generate_initial_hashtree(&self.image_data, &hashfile)?;
 
         fs::write(outfile, verity.output())
             .context("failed to write veritysetup command output to a file")?;
@@ -123,25 +123,29 @@ impl UpdateBuilder {
     }
 
     fn compress_image(&self) -> Result<()> {
-        info!("Compressing image data");
-        util::exec_cmdline("xz", format!("-T0 {}", self.target.display()))
-            .context(format!("failed to decompress {}", self.target.display()))?;
+        if self.config.compress() {
+            info!("Compressing image data");
+            util::exec_cmdline("xz", format!("-T0 {}", self.image_data.display()))
+                .context(format!("failed to compress {}", self.image_data.display()))?;
+            // Rename back to original image_data filename
+            let xz_filename = UpdateBuilder::target_filename(&self.config) + ".xz";
+            fs::rename(self.config.workdir_path(&xz_filename), &self.image_data)?;
+        }
         Ok(())
     }
 
     fn write_final_image(&self) -> Result<()> {
         let header = self.generate_header()?;
         let filename = format!("{}.img", UpdateBuilder::target_filename(&self.config));
-        let mut image_path = self.config.workdir_path(&filename);
+        let image_path = self.config.workdir_path(&filename);
 
         let mut out = File::create(&image_path)
             .context(format!("could not open output file {}", image_path.display()))?;
 
         header.write_header(&out)?;
 
-        image_path.set_extension("xz");
-        let mut data = File::open(&image_path)
-            .context(format!("could not open compressed image data file {}", image_path.display()))?;
+        let mut data = File::open(&self.image_data)
+            .context(format!("could not open image data file {}", self.image_data.display()))?;
         io::copy(&mut data, &mut out)
             .context("error copying image data to output file")?;
         Ok(())
@@ -149,7 +153,10 @@ impl UpdateBuilder {
 
     fn generate_header(&self) -> Result<ImageHeader> {
         let hdr = ImageHeader::new();
-        hdr.set_flag(ImageHeader::FLAG_DATA_COMPRESSED);
+
+        if self.config.compress() {
+            hdr.set_flag(ImageHeader::FLAG_DATA_COMPRESSED);
+        }
 
         let metainfo = self.generate_metainfo();
         fs::write(self.config.workdir_path("metainfo"), &metainfo)?;
