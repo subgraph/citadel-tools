@@ -14,6 +14,8 @@ pub struct BuildConfig {
     version: usize,
     timestamp: String,
     source: String,
+    #[serde(default)]
+    compress: bool,
     #[serde(rename = "kernel-version")]
     kernel_version: Option<String>,
     #[serde(rename = "kernel-id")]
@@ -109,5 +111,9 @@ impl BuildConfig {
 
     pub fn image_type(&self) -> &str {
         &self.image_type
+    }
+
+    pub fn compress(&self) -> bool {
+        self.compress
     }
 }
