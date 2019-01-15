@@ -160,9 +160,12 @@ fn install_rootfs(arg_matches: &ArgMatches) -> Result<()> {
     }
 
     let img = load_image(arg_matches)?;
+
+    info!("Verifying header signature");
     img.header().verify_signature()?;
 
     if !arg_matches.is_present("skip-sha") {
+        info!("Verifying sha256 hash of image");
         let shasum = img.generate_shasum()?;
         if shasum != img.metainfo().shasum() {
             bail!("image file does not have expected sha256 value");
