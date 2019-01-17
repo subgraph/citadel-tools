@@ -1,0 +1,2 @@
+[workspace]
+members = ["citadel-desktopd", "citadel-image", "citadel-install", "citadel-mount", "citadel-realms"]

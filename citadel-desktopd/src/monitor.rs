@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicBool,Ordering};
 use std::thread::{self,JoinHandle};
 use std::os::unix::thread::JoinHandleExt;
 use std::io::ErrorKind;
+use std::ffi::OsStr;
 
 use nix::libc;
 use nix::sys::signal;
@@ -132,7 +133,7 @@ impl MonitorWorker {
         Ok(())
     }
 
-    fn full_event_path(&self, ev: &Event) -> Result<PathBuf> {
+    fn full_event_path(&self, ev: &Event<&OsStr>) -> Result<PathBuf> {
         let filename = ev.name
             .ok_or(format_err!("inotify event received without a filename"))?;
         let path = self.descriptors.get(&ev.wd)
@@ -140,7 +141,7 @@ impl MonitorWorker {
         Ok(path.join(filename))
     }
 
-    fn handle_event(&self, ev: &Event) -> Result<()> {
+    fn handle_event(&self, ev: &Event<&OsStr>) -> Result<()> {
         let handler = self.handler.lock().unwrap();
         let pb = self.full_event_path(ev)?;
         let path = pb.as_path();
