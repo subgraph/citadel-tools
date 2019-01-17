@@ -13,7 +13,7 @@ use clap::AppSettings::*;
 
 use build::UpdateBuilder;
 use config::BuildConfig;
-use libcitadel::{Result,ResourceImage,set_verbose,format_error,Partition,KeyPair};
+use libcitadel::{Result,ResourceImage,set_verbose,format_error,Partition,KeyPair,ImageHeader};
 
 mod build;
 mod config;
@@ -52,6 +52,9 @@ fn main() {
             .arg(Arg::with_name("skip-sha")
                 .long("skip-sha")
                 .help("Skip verification of header sha256 value"))
+            .arg(Arg::with_name("no-prefer")
+                .long("no-prefer")
+                .help("Don't set PREFER_BOOT flag"))
             .arg(Arg::with_name("path")
                 .required_unless("choose")
                 .help("Path to image file")))
@@ -161,9 +164,6 @@ fn install_rootfs(arg_matches: &ArgMatches) -> Result<()> {
 
     let img = load_image(arg_matches)?;
 
-    info!("Verifying header signature");
-    img.header().verify_signature()?;
-
     if !arg_matches.is_present("skip-sha") {
         info!("Verifying sha256 hash of image");
         let shasum = img.generate_shasum()?;
@@ -173,7 +173,21 @@ fn install_rootfs(arg_matches: &ArgMatches) -> Result<()> {
     }
 
     let partition = choose_install_partition(true)?;
+
+    if !arg_matches.is_present("no-prefer") {
+        clear_prefer_boot()?;
+        img.header().set_flag(ImageHeader::FLAG_PREFER_BOOT);
+    }
     img.write_to_partition(&partition)?;
+    Ok(())
+}
+
+fn clear_prefer_boot() -> Result<()> {
+    for mut p in Partition::rootfs_partitions()? {
+        if p.is_initialized() && p.header().has_flag(ImageHeader::FLAG_PREFER_BOOT) {
+            p.clear_flag_and_write(ImageHeader::FLAG_PREFER_BOOT)?;
+        }
+    }
     Ok(())
 }
 
