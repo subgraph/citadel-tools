@@ -196,8 +196,14 @@ impl ResourceImage {
 
     pub fn setup_verity_device(&self) -> Result<PathBuf> {
         if !CommandLine::nosignatures() {
-            self.header.verify_signature()?;
-            info!("Image signature is valid for channel {}", self.metainfo.channel());
+            match self.header.public_key()? {
+                Some(pubkey) => {
+                    if !self.header.verify_signature(pubkey) {
+                        bail!("Header signature verification failed");
+                    }
+                }
+                None => bail!("Cannot verify header signature because no public key for channel {} is available", self.metainfo.channel())
+            }
         }
         info!("Setting up dm-verity device for image");
         if !self.has_verity_hashtree() {
