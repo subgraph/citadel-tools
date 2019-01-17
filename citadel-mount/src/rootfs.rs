@@ -1,93 +1,174 @@
 use std::process::Command;
 
-use libcitadel::{BlockDev,CommandLine,Partition,Result,verity};
+use libcitadel::{BlockDev,CommandLine,ImageHeader,Partition,Result,verity};
 use std::path::Path;
 use std::process::Stdio;
-use BootSelection;
 use ResourceImage;
 
-pub struct Rootfs {
+pub fn setup_rootfs() -> Result<()> {
+    if CommandLine::install_mode() || CommandLine::live_mode() {
+        setup_rootfs_resource()
+    } else {
+        let p = choose_boot_partiton(true)?;
+        setup_partition(p)
+    }
 }
 
-impl Rootfs {
-    pub fn new() -> Rootfs {
-        Rootfs {}
+fn setup_partition(mut p: Partition) -> Result<()> {
+    if CommandLine::noverity() {
+        setup_partition_unverified(&p)
+    } else {
+        setup_partition_verified(&mut p)
     }
+}
 
-    pub fn setup(&self) -> Result<()> {
-        if CommandLine::install_mode() || CommandLine::live_mode() {
-            self.setup_rootfs_resource()
-        } else {
-            let partition = BootSelection::choose_boot_partition()?;
-            self.setup_partition(partition)
+fn setup_rootfs_resource() -> Result<()> {
+    info!("Searching for rootfs resource image");
+
+    let img = ResourceImage::find_rootfs()?;
+
+    if CommandLine::noverity() {
+        setup_resource_unverified(&img)
+    } else {
+        setup_resource_verified(&img)
+    }
+}
+
+fn setup_resource_unverified(img: &ResourceImage) -> Result<()> {
+    if img.is_compressed() {
+        img.decompress()?;
+    }
+    let loopdev = img.create_loopdev()?;
+    info!("Loop device created: {}", loopdev.display());
+    setup_linear_mapping(&loopdev)
+}
+
+fn setup_resource_verified(img: &ResourceImage) -> Result<()> {
+    let _ = img.setup_verity_device()?;
+    Ok(())
+}
+
+fn setup_partition_unverified(p: &Partition) -> Result<()> {
+    info!("Creating /dev/mapper/rootfs device with linear device mapping of partition (no verity)");
+    setup_linear_mapping(p.path())
+}
+
+fn setup_partition_verified(p: &mut Partition) -> Result<()> {
+    info!("Creating /dev/mapper/rootfs dm-verity device");
+    if !CommandLine::nosignatures() {
+        if !p.has_public_key() {
+            bail!("No public key available for channel {}", p.metainfo().channel())
+        }
+        if !p.is_signature_valid() {
+            p.write_status(ImageHeader::STATUS_BAD_SIG)?;
+            bail!("Signature verification failed on partition");
+        }
+        info!("Image signature is valid for channel {}", p.metainfo().channel());
+    }
+    verity::setup_partition_device(p)?;
+    Ok(())
+}
+
+fn setup_linear_mapping(blockdev: &Path) -> Result<()> {
+    let dev = BlockDev::open_ro(blockdev)?;
+    let table = format!("0 {} linear {} 0", dev.nsectors()?, blockdev.display());
+
+    info!("/usr/sbin/dmsetup create rootfs --table '{}'", table);
+
+    let ok = Command::new("/usr/sbin/dmsetup")
+        .args(&["create", "rootfs", "--table", &table])
+        .stderr(Stdio::inherit())
+        .status()
+        .expect("unable to execute /usr/sbin/dmsetup")
+        .success();
+
+    if !ok {
+        bail!("Failed to set up linear identity mapping with /usr/sbin/dmsetup");
+    }
+    Ok(())
+}
+
+fn choose_boot_partiton(scan: bool) -> Result<Partition> {
+    let mut partitions = Partition::rootfs_partitions()?;
+
+    if scan {
+        for p in &mut partitions {
+            p.boot_scan()?;
         }
     }
 
-    fn setup_partition(&self, partition: Partition) -> Result<()> {
-        if CommandLine::noverity() {
-            self.setup_partition_unverified(&partition)
-        } else {
-            self.setup_partition_verified(&partition)
+    let mut best = None;
+    for p in partitions {
+        best = compare_boot_partitions(best, p);
+    }
+    best.ok_or(format_err!("No partition found to boot from"))
+}
+
+fn compare_boot_partitions(a: Option<Partition>, b: Partition) -> Option<Partition> {
+    if !is_bootable(&b) {
+        return a;
+    }
+
+    // b is bootable, so if a is None, then just return b
+    let a = match a {
+        Some(partition) => partition,
+        None => return Some(b),
+    };
+
+    // First partition with FLAG_PREFER_BOOT trumps everything
+    if a.is_preferred() {
+        return Some(a);
+    }
+
+    if b.is_preferred() {
+        return Some(b);
+    }
+
+    // Compare versions and channels
+    let a_v = a.metainfo().version();
+    let b_v = b.metainfo().version();
+
+    // Compare versions only if channels match
+    if a.metainfo().channel() == b.metainfo().channel() {
+        if a_v > b_v {
+            return Some(a);
+        } else if b_v > a_v {
+            return Some(b);
         }
     }
 
-    fn setup_rootfs_resource(&self) -> Result<()> {
-        info!("Searching for rootfs resource image");
-
-        let img = ResourceImage::find_rootfs()?;
-
-        if CommandLine::noverity() {
-            self.setup_resource_unverified(&img)
-        } else {
-            self.setup_resource_verified(&img)
-        }
+    // choose NEW over GOOD if versions are the same or
+    // if versions cannot be compared because channels differ
+    if b.is_new() && a.is_good() {
+        return Some(b);
     }
 
-    fn setup_resource_unverified(&self, img: &ResourceImage) -> Result<()> {
-        if img.is_compressed() {
-            img.decompress()?;
-        }
-        let loopdev = img.create_loopdev()?;
-        info!("Loop device created: {}", loopdev.display());
-        self.setup_linear_mapping(&loopdev)
+    Some(a)
+}
+
+fn is_bootable(p: &Partition) -> bool {
+    if !p.is_initialized() {
+        return false;
     }
 
-    fn setup_resource_verified(&self, img: &ResourceImage) -> Result<()> {
-        let _ = img.setup_verity_device()?;
-        Ok(())
+    // signatures enabled so not bootable without pubkey
+    if signatures_enabled() && !p.has_public_key() {
+        return false;
     }
 
-    fn setup_partition_unverified(&self, partition: &Partition) -> Result<()> {
-        info!("Creating /dev/mapper/rootfs device with linear device mapping of partition (no verity)");
-        self.setup_linear_mapping(partition.path())
+    if p.is_new() || p.is_good() {
+        return true;
     }
 
-    fn setup_partition_verified(&self, partition: &Partition) -> Result<()> {
-        info!("Creating /dev/mapper/rootfs dm-verity device");
-        if !CommandLine::nosignatures() {
-            partition.header().verify_signature()?;
-            info!("Image signature is valid for channel {}", partition.metainfo().channel());
-        }
-        verity::setup_partition_device(partition)?;
-        Ok(())
+    // If signatures are disabled then don't disqualify an
+    // image which failed a prior signature verification
+    if !signatures_enabled() && p.is_sig_failed() {
+        return true;
     }
 
-    fn setup_linear_mapping(&self, blockdev: &Path) -> Result<()> {
-        let dev = BlockDev::open_ro(blockdev)?;
-        let table = format!("0 {} linear {} 0", dev.nsectors()?, blockdev.display());
+    false
+}
 
-        info!("/usr/sbin/dmsetup create rootfs --table '{}'", table);
-
-        let ok = Command::new("/usr/sbin/dmsetup")
-            .args(&["create", "rootfs", "--table", &table])
-            .stderr(Stdio::inherit())
-            .status()
-            .expect("unable to execute /usr/sbin/dmsetup")
-            .success();
-
-        if !ok {
-            bail!("Failed to set up linear identity mapping with /usr/sbin/dmsetup");
-        }
-        Ok(())
-    }
+fn signatures_enabled() -> bool {
+    !(CommandLine::nosignatures() || CommandLine::noverity())
 }

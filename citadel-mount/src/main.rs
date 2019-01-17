@@ -10,11 +10,7 @@ use std::fs;
 use libcitadel::{Result,CommandLine,set_verbose,format_error,ResourceImage,util};
 
 
-mod boot_select;
 mod rootfs;
-pub use boot_select::BootSelection;
-use rootfs::Rootfs;
-
 
 /// mount command supports 4 subcommands
 ///
@@ -27,7 +23,7 @@ use rootfs::Rootfs;
 ///
 /// 'kernel' mounts a resource bundle containing kernel modules
 /// 'extra' mounts a resource bundle containing extra files
-///
+/// 'overlay' mounts a tmpfs overlay over rootfs filesystem only if citadel.overlay is set
 ///
 
 fn main() {
@@ -54,8 +50,7 @@ fn main() {
 
 fn mount_rootfs() -> Result<()> {
     info!("citadel-mount rootfs");
-    let rootfs = Rootfs::new();
-    rootfs.setup()
+    rootfs::setup_rootfs()
 }
 
 fn mount_kernel() -> Result<()> {
