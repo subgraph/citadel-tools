@@ -127,9 +127,9 @@ impl Installer {
 
         self.output("\n")?;
         self.header("Installing rootfs partitions\n")?;
-        let args = format!("install-rootfs {}", self.artifact_path("citadel-rootfs.img").display());
-        self.cmd(CITADEL_IMAGE, &args)?;
-        self.cmd(CITADEL_IMAGE, &args)?;
+        let rootfs = self.artifact_path("citadel-rootfs.img");
+        self.cmd(CITADEL_IMAGE, format!("install-rootfs --skip-sha {}", rootfs.display()))?;
+        self.cmd(CITADEL_IMAGE, format!("install-rootfs --skip-sha --no-prefer {}", rootfs.display()))?;
 
         self.cmd(LSBLK, format!("-o NAME,SIZE,TYPE,FSTYPE {}", &self.target_device))?;
 
