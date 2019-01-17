@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 
-use Result;
+use crate::Result;
 
 lazy_static! {
     static ref CMDLINE: CommandLine = match CommandLine::load() {

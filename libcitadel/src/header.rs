@@ -7,8 +7,8 @@ use failure::ResultExt;
 
 use toml;
 
-use blockdev::AlignedBuffer;
-use {BlockDev,Result,public_key_for_channel,PublicKey};
+use crate::blockdev::AlignedBuffer;
+use crate::{BlockDev,Result,public_key_for_channel,PublicKey};
 
 /// Expected magic value in header
 const MAGIC: &[u8] = b"SGOS";

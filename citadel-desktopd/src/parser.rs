@@ -3,8 +3,8 @@ use std::io::Read;
 use std::fs::File;
 use std::path::Path;
 use std::collections::HashSet;
-use desktop::{DesktopFile,Line};
-use Result;
+use crate::desktop::{DesktopFile,Line};
+use crate::Result;
 
 lazy_static! {
     // These are the keys which are copied into the translated .desktop files

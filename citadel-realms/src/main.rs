@@ -29,8 +29,8 @@ macro_rules! warn {
 }
 
 macro_rules! info {
-    ($e:expr) => { if ::verbose() { println!("[+]: {}", $e); } };
-    ($fmt:expr, $($arg:tt)+) => { if ::verbose() { println!("[+]: {}", format!($fmt, $($arg)+)); } };
+    ($e:expr) => { if crate::verbose() { println!("[+]: {}", $e); } };
+    ($fmt:expr, $($arg:tt)+) => { if crate::verbose() { println!("[+]: {}", format!($fmt, $($arg)+)); } };
 }
 
 mod manager;
@@ -41,11 +41,11 @@ mod config;
 mod network;
 mod appimg;
 
-use realm::{Realm,RealmSymlinks};
-use manager::RealmManager;
-use config::RealmConfig;
-use systemd::Systemd;
-use network::NetworkConfig;
+use crate::realm::{Realm,RealmSymlinks};
+use crate::manager::RealmManager;
+use crate::config::RealmConfig;
+use crate::systemd::Systemd;
+use crate::network::NetworkConfig;
 
 fn main() {
     let app = App::new("citadel-realms")

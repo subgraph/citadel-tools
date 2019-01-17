@@ -4,7 +4,7 @@ use std::collections::{HashSet,HashMap};
 use std::io::{BufReader,BufRead,Write};
 use std::fs::{self,File};
 
-use Result;
+use crate::Result;
 
 const MIN_MASK: usize = 16;
 const MAX_MASK: usize = 24;

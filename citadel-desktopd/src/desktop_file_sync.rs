@@ -4,10 +4,10 @@ use std::fs;
 
 use failure::ResultExt;
 
-use monitor::{DirectoryMonitor,MonitorEventHandler};
-use parser::DesktopFileParser;
-use config::Config;
-use Result;
+use crate::monitor::{DirectoryMonitor,MonitorEventHandler};
+use crate::parser::DesktopFileParser;
+use crate::config::Config;
+use crate::Result;
 
 
 pub struct DesktopFileSync {

@@ -8,7 +8,7 @@ use std::io::{self,Write};
 use libc;
 use walkdir::WalkDir;
 
-use Result;
+use crate::Result;
 
 
 pub fn path_filename(path: &Path) -> &str {

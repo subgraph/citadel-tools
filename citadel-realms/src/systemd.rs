@@ -14,10 +14,10 @@ const SYSTEMD_UNIT_PATH: &str = "/run/systemd/system";
 
 const DESKTOPD_SERVICE: &str = "citadel-desktopd.service";
 
-use Realm;
-use NetworkConfig;
-use Result;
-use util::{path_filename,is_first_char_alphabetic};
+use crate::Realm;
+use crate::NetworkConfig;
+use crate::Result;
+use crate::util::{path_filename,is_first_char_alphabetic};
 
 #[derive(Clone)]
 pub struct Systemd {

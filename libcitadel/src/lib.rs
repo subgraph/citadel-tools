@@ -66,14 +66,14 @@ pub mod util;
 pub mod verity;
 mod mount;
 
-pub use config::OsRelease;
-pub use blockdev::BlockDev;
-pub use cmdline::CommandLine;
-pub use header::{ImageHeader,MetaInfo};
-pub use partition::Partition;
-pub use resource::ResourceImage;
-pub use keys::{KeyPair,PublicKey};
-pub use mount::Mount;
+pub use crate::config::OsRelease;
+pub use crate::blockdev::BlockDev;
+pub use crate::cmdline::CommandLine;
+pub use crate::header::{ImageHeader,MetaInfo};
+pub use crate::partition::Partition;
+pub use crate::resource::ResourceImage;
+pub use crate::keys::{KeyPair,PublicKey};
+pub use crate::mount::Mount;
 
 const DEVKEYS_HEX: &str =
     "3053020101300506032b6570042204206ed2849c6c5168e1aebc50005ac3d4a4e84af4889e4e0189bb4c787e6ee0be49a1230321006b652764c62a1de35e7e37af2b743e9a5b82cee2211cf3091d2514441b417f5f";

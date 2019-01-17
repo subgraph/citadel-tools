@@ -17,9 +17,9 @@ mod desktop_file_sync;
 use std::result;
 use std::process;
 use failure::Error;
-use desktop_file_sync::DesktopFileSync;
+use crate::desktop_file_sync::DesktopFileSync;
 
-use config::Config;
+use crate::config::Config;
 
 pub type Result<T> = result::Result<T, Error>;
 

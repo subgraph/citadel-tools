@@ -1,6 +1,6 @@
 use std::path::{Path,PathBuf};
 use std::fs;
-use {Result,ImageHeader,MetaInfo,Mount,PublicKey,public_key_for_channel};
+use crate::{Result,ImageHeader,MetaInfo,Mount,PublicKey,public_key_for_channel};
 
 #[derive(Clone)]
 pub struct Partition {

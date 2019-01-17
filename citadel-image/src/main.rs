@@ -11,8 +11,8 @@ use std::path::Path;
 use clap::{App,Arg,SubCommand,ArgMatches};
 use clap::AppSettings::*;
 
-use build::UpdateBuilder;
-use config::BuildConfig;
+use crate::build::UpdateBuilder;
+use crate::config::BuildConfig;
 use libcitadel::{Result,ResourceImage,set_verbose,format_error,Partition,KeyPair,ImageHeader};
 
 mod build;

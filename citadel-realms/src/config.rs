@@ -2,7 +2,7 @@ use std::path::Path;
 use std::fs::File;
 use std::io::Read;
 use toml;
-use Result;
+use crate::Result;
 
 fn default_true() -> bool {
     true

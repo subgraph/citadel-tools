@@ -11,7 +11,7 @@ use nix::sys::signal;
 
 use inotify::{Events,Inotify,EventMask,WatchMask,Event,WatchDescriptor};
 
-use Result;
+use crate::Result;
 
 pub trait MonitorEventHandler: Send+Sync {
     fn file_added(&self, path: &Path) -> Result<()> { let _ = path; Ok(()) }

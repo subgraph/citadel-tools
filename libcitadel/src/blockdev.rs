@@ -6,7 +6,7 @@ use std::fs::OpenOptions;
 use std::os::unix::fs::OpenOptionsExt;
 use libc;
 
-use Result;
+use crate::Result;
 
 // IO on block devices requires 4096 byte aligned buffer
 const REQUIRED_ALIGNMENT: usize = 4096;

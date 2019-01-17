@@ -1,7 +1,7 @@
 
 use std::path::{PathBuf,Path};
 use std::fs;
-use Result;
+use crate::Result;
 
 pub struct Mount {
     source: String,

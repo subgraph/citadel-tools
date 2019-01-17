@@ -1,7 +1,7 @@
 use std::path::{Path,PathBuf};
 use std::fs::File;
 use std::io::Read;
-use Result;
+use crate::Result;
 use toml;
 
 #[derive(Clone)]

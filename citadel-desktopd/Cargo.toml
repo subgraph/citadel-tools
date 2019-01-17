@@ -3,6 +3,7 @@ name = "citadel-desktopd"
 version = "0.1.0"
 authors = ["brl@subgraph.com"]
 homepage = "https://github.com/subgraph/citadel"
+edition = "2018"
 
 [dependencies]
 failure = "0.1.1"

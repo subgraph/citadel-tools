@@ -1,4 +1,4 @@
-use Result;
+use crate::Result;
 use ring::rand;
 use ring::signature::{self,Ed25519KeyPair,ED25519_PUBLIC_KEY_LEN,ED25519_PKCS8_V2_LEN};
 use untrusted::Input;

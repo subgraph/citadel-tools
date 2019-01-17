@@ -2,7 +2,7 @@ use std::io::Write;
 use std::fs::File;
 use std::path::Path;
 use std::collections::HashMap;
-use Result;
+use crate::Result;
 
 
 pub struct DesktopFile {

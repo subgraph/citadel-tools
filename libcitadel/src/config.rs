@@ -2,7 +2,7 @@ use std::path::Path;
 use std::collections::HashMap;
 use std::fs;
 
-use Result;
+use crate::Result;
 
 lazy_static! {
     static ref OS_RELEASE: Option<OsRelease> = match OsRelease::load() {

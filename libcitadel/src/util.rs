@@ -8,7 +8,7 @@ use std::env;
 
 use failure::ResultExt;
 
-use Result;
+use crate::Result;
 
 fn search_path(filename: &str) -> Result<PathBuf> {
     let path_var = env::var("PATH")?;

@@ -1,8 +1,8 @@
 use std::path::Path;
 use std::process::Command;
 
-use Realm;
-use Result;
+use crate::Realm;
+use crate::Result;
 
 const BASE_APPIMG_PATH: &str = "/storage/appimg/base.appimg";
 const BTRFS_COMMAND: &str = "/usr/bin/btrfs";

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::process::{Command, Stdio};
 
 use failure::ResultExt;
-use {Result,ImageHeader,MetaInfo,Partition,util};
+use crate::{Result,ImageHeader,MetaInfo,Partition,util};
 
 const VERITYSETUP: &str = "/sbin/veritysetup";
 const LOSETUP: &str = "/sbin/losetup";

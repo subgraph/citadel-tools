@@ -3,7 +3,7 @@ use std::ffi::OsStr;
 use std::io::{self,Seek,SeekFrom};
 use std::path::{Path, PathBuf};
 
-use {CommandLine,OsRelease,ImageHeader,MetaInfo,Result,Partition,Mount,verity,util};
+use crate::{CommandLine,OsRelease,ImageHeader,MetaInfo,Result,Partition,Mount,verity,util};
 
 use failure::ResultExt;
 

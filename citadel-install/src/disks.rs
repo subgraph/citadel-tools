@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::fs;
 
-use Result;
-use util;
+use crate::Result;
+use crate::util;
 
 ///
 /// Represents a disk partition device on the system
