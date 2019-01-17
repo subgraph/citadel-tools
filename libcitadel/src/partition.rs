@@ -1,6 +1,6 @@
 use std::path::{Path,PathBuf};
 use std::fs;
-use {CommandLine,Result,ImageHeader,MetaInfo,Mount};
+use {Result,ImageHeader,MetaInfo,Mount,PublicKey,public_key_for_channel};
 
 #[derive(Clone)]
 pub struct Partition {
@@ -13,6 +13,8 @@ pub struct Partition {
 struct HeaderInfo {
     header: ImageHeader,
     metainfo: MetaInfo,
+    // None if no public key available for channel named in metainfo
+    pubkey: Option<PublicKey>,
 }
 
 impl Partition {
@@ -44,8 +46,17 @@ impl Partition {
                 return Ok(None);
             },
         };
+
+        let pubkey = match public_key_for_channel(metainfo.channel()) {
+            Ok(result) => result,
+            Err(err) => {
+                warn!("Error parsing pubkey for channel '{}': {}", metainfo.channel(), err);
+                None
+            }
+        };
+
         Ok(Some(HeaderInfo {
-            header, metainfo
+            header, metainfo, pubkey,
         }))
     }
 
@@ -95,8 +106,42 @@ impl Partition {
         self.header().has_flag(ImageHeader::FLAG_PREFER_BOOT)
     }
 
+    pub fn is_sig_failed(&self) -> bool {
+        self.header().status() == ImageHeader::STATUS_BAD_SIG
+    }
+
+    pub fn is_signature_valid(&self) -> bool {
+        if let Some(ref hinfo) = self.hinfo {
+            if let Some(ref pubkey) = hinfo.pubkey {
+                return pubkey.verify(
+                    &self.header().metainfo_bytes(),
+                    &self.header().signature())
+
+            }
+        }
+        false
+    }
+
+    pub fn has_public_key(&self) -> bool {
+        if let Some(ref h) = self.hinfo {
+            h.pubkey.is_some()
+        } else {
+            false
+        }
+    }
+
     pub fn write_status(&mut self, status: u8) -> Result<()> {
         self.header_mut().set_status(status);
+        self.header().write_partition(&self.path)
+    }
+
+    pub fn set_flag_and_write(&mut self, flag: u8) -> Result<()> {
+        self.header_mut().set_flag(flag);
+        self.header().write_partition(&self.path)
+    }
+
+    pub fn clear_flag_and_write(&mut self, flag: u8) -> Result<()> {
+        self.header_mut().clear_flag(flag);
         self.header().write_partition(&self.path)
     }
 
@@ -105,24 +150,19 @@ impl Partition {
     ///
     /// Mark `STATUS_TRY_BOOT` partition as `STATUS_FAILED`.
     ///
-    /// If metainfo cannot be parsed, mark as `STATUS_BAD_META`.
-    ///
-    /// Verify metainfo signature and mark `STATUS_BAD_SIG` if
-    /// signature verification fails.
+    /// If a partition that had prior signature failure now
+    /// has a valid signature set to STATUS_NEW
     ///
     pub fn boot_scan(&mut self) -> Result<()> {
         if !self.is_initialized() {
             return Ok(())
         }
         if self.header().status() == ImageHeader::STATUS_TRY_BOOT {
+            warn!("Partition {} has STATUS_TRY_BOOT, assuming it failed boot attempt and marking STATUS_FAILED", self.path().display());
             self.write_status(ImageHeader::STATUS_FAILED)?;
         }
-
-        if !CommandLine::nosignatures() {
-            if let Err(e) = self.header().verify_signature() {
-                warn!("Signature verification failed on partition: {}", e);
-                self.write_status(ImageHeader::STATUS_BAD_SIG)?;
-            }
+        if self.is_sig_failed() && self.is_signature_valid() {
+            self.write_status(ImageHeader::STATUS_NEW)?;
         }
         Ok(())
     }

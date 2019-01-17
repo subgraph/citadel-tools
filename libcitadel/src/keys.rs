@@ -11,6 +11,7 @@ use rustc_serialize::hex::{FromHex,ToHex};
 ///
 ///
 
+#[derive(Clone)]
 pub struct PublicKey([u8; ED25519_PUBLIC_KEY_LEN]);
 pub struct KeyPair([u8; ED25519_PKCS8_V2_LEN]);
 pub struct Signature(signature::Signature);
