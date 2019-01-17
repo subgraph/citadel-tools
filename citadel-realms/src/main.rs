@@ -1,12 +1,6 @@
 #[macro_use] extern crate failure;
 #[macro_use] extern crate serde_derive;
 
-extern crate libc;
-extern crate clap;
-extern crate toml;
-extern crate termcolor;
-extern crate walkdir;
-
 use failure::Error;
 use clap::{App,Arg,ArgMatches,SubCommand};
 use clap::AppSettings::*;

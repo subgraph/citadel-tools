@@ -2,9 +2,6 @@
 #[macro_use] extern crate failure;
 #[macro_use] extern crate serde_derive;
 
-extern crate clap;
-extern crate toml;
-
 use std::process::exit;
 use std::path::Path;
 

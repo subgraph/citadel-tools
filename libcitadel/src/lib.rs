@@ -20,13 +20,6 @@ macro_rules! notify {
     ($fmt:expr, $($arg:tt)+) => { println!("[+] {}", format!($fmt, $($arg)+)); };
 }
 
-extern crate libc;
-extern crate serde;
-extern crate toml;
-extern crate ring;
-extern crate untrusted;
-extern crate rustc_serialize;
-
 use std::cell::RefCell;
 use std::result;
 

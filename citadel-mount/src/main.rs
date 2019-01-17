@@ -1,8 +1,6 @@
 #[macro_use] extern crate failure;
 #[macro_use] extern crate libcitadel;
 
-extern crate libc;
-
 use std::process::exit;
 use std::env;
 use std::fs;

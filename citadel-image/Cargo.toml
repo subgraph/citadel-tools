@@ -3,6 +3,7 @@ name = "citadel-image"
 version = "0.1.0"
 authors = ["Bruce Leidl <bruce@subgraph.com>"]
 homepage = "https://github.com/subgraph/citadel"
+edition = "2018"
 
 [dependencies]
 libcitadel = { path = "../libcitadel" }
