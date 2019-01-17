@@ -8,7 +8,7 @@ use failure::ResultExt;
 use toml;
 
 use blockdev::AlignedBuffer;
-use {BlockDev,Result,public_key_for_channel};
+use {BlockDev,Result,public_key_for_channel,PublicKey};
 
 /// Expected magic value in header
 const MAGIC: &[u8] = b"SGOS";
@@ -226,16 +226,13 @@ impl ImageHeader {
         Ok(())
     }
 
-    pub fn verify_signature(&self) -> Result<()> {
+    pub fn public_key(&self) -> Result<Option<PublicKey>> {
         let metainfo = self.metainfo()?;
+        public_key_for_channel(metainfo.channel())
+    }
 
-        if let Some(pubkey) = public_key_for_channel(metainfo.channel())? {
-            if !pubkey.verify(&self.metainfo_bytes(), &self.signature()) {
-                bail!("Header signature verification failed");
-            }
-            return Ok(())
-        }
-        Err(format_err!("Cannot verify signature because no public key found for channel '{}'", metainfo.channel()))
+    pub fn verify_signature(&self, pubkey: PublicKey) -> bool {
+        pubkey.verify(&self.metainfo_bytes(), &self.signature())
     }
 
     pub fn write_header<W: Write>(&self, mut writer: W) -> Result<()> {
