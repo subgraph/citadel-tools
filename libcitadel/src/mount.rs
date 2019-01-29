@@ -15,10 +15,15 @@ impl Mount {
     /// Returns `true` if `path` matches the source field (first field)
     /// of any of the mount lines listed in /proc/mounts
     ///
-    pub fn is_path_mounted<P: AsRef<Path>>(path: P) -> Result<bool> {
+    pub fn is_source_mounted<P: AsRef<Path>>(path: P) -> Result<bool> {
         let path_str = path.as_ref().to_string_lossy();
         let mounts = Mount::all_mounts()?;
         Ok(mounts.into_iter().any(|m| m.source == path_str))
+    }
+
+    pub fn is_target_mounted<P: AsRef<Path>>(path: P) -> Result<bool> {
+        let mounts = Mount::all_mounts()?;
+        Ok(mounts.into_iter().any(|m| m.target == path.as_ref()))
     }
 
     pub fn all_mounts() -> Result<Vec<Mount>> {
