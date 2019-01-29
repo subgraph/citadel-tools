@@ -62,6 +62,9 @@ impl CommandLine {
 
     pub fn overlay() -> bool { CommandLine::var_exists("citadel.overlay") }
 
+    /// Return `true` if sealed realmfs images are enabled on kernel command line
+    pub fn sealed() -> bool { CommandLine::var_exists("citadel.sealed") }
+
     pub fn channel() -> Option<&'static str> {
         CommandLine::get_value("citadel.channel")
     }
