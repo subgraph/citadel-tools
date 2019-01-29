@@ -12,6 +12,28 @@ use failure::ResultExt;
 
 use crate::Result;
 
+pub fn is_valid_name(name: &str, maxsize: usize) -> bool {
+    name.len() <= maxsize &&
+        // Also false on empty string
+        is_first_char_alphabetic(name) &&
+        name.chars().all(is_alphanum_or_dash)
+}
+
+fn is_alphanum_or_dash(c: char) -> bool {
+    is_ascii(c) && (c.is_alphanumeric() || c == '-')
+}
+
+fn is_ascii(c: char) -> bool {
+    c as u32 <= 0x7F
+}
+
+pub fn is_first_char_alphabetic(s: &str) -> bool {
+    if let Some(c) = s.chars().next() {
+        return is_ascii(c) && c.is_alphabetic()
+    }
+    false
+}
+
 fn search_path(filename: &str) -> Result<PathBuf> {
     let path_var = env::var("PATH")?;
     for mut path in env::split_paths(&path_var) {
