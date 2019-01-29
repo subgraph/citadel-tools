@@ -226,6 +226,11 @@ impl ImageHeader {
         Ok(())
     }
 
+    pub fn clear_signature(&self) -> Result<()> {
+        let zeros = vec![0u8; SIGNATURE_LENGTH];
+        self.set_signature(&zeros)
+    }
+
     pub fn public_key(&self) -> Result<Option<PublicKey>> {
         let metainfo = self.metainfo()?;
         public_key_for_channel(metainfo.channel())
