@@ -7,6 +7,7 @@ use failure::ResultExt;
 use libcitadel::{Result,ImageHeader,verity,util,devkeys};
 
 use crate::BuildConfig;
+use std::path::Path;
 
 pub struct UpdateBuilder {
     config: BuildConfig,
@@ -28,8 +29,7 @@ fn align(sz: usize, n: usize) -> usize {
 impl UpdateBuilder {
 
     pub fn new(config: BuildConfig) -> UpdateBuilder {
-        let filename = UpdateBuilder::target_filename(&config);
-        let image_data= config.workdir_path(&filename);
+        let image_data = config.workdir_path(UpdateBuilder::build_filename(&config));
         UpdateBuilder {
             config, image_data,
             nblocks: None, shasum: None, verity_salt: None,
@@ -37,8 +37,16 @@ impl UpdateBuilder {
         }
     }
 
-    fn target_filename(config: &BuildConfig) -> String {
-        format!("citadel-{}-{}-{:03}", config.img_name(), config.channel(), config.version())
+    fn target_filename(&self) -> String {
+        format!("citadel-{}-{}-{:03}.img", self.config.img_name(), self.config.channel(), self.config.version())
+    }
+
+    fn build_filename(config: &BuildConfig) -> String {
+        format!("citadel-{}-{}-{:03}", config.image_type(), config.channel(), config.version())
+    }
+
+    fn verity_filename(&self) -> String {
+        format!("verity-hash-{}-{:03}", self.config.image_type(), self.config.version())
     }
 
     pub fn build(&mut self) -> Result<()> {
@@ -52,6 +60,9 @@ impl UpdateBuilder {
             .context("failed generating dm-verity hash tree")?;
 
         self.calculate_shasum()?;
+
+        self.prepend_empty_block()?;
+
         self.compress_image()?;
 
         self.write_final_image()
@@ -60,8 +71,12 @@ impl UpdateBuilder {
         Ok(())
     }
 
+    fn image(&self) -> &Path {
+        &self.image_data
+    }
+
     fn pad_image(&mut self) -> Result<()> {
-        let meta = self.image_data.metadata()?;
+        let meta = self.image().metadata()?;
         let len = meta.len() as usize;
         if len % 512 != 0 {
             bail!("Image file size is not a multiple of sector size (512 bytes)");
@@ -73,7 +88,7 @@ impl UpdateBuilder {
             let zeros = vec![0u8; padlen];
             let mut file = OpenOptions::new()
                 .append(true)
-                .open(&self.image_data)?;
+                .open(self.image())?;
             file.write_all(&zeros)?;
         }
 
@@ -85,8 +100,8 @@ impl UpdateBuilder {
     }
 
     fn calculate_shasum(&mut self) -> Result<()> {
-        let output = util::exec_cmdline_with_output("sha256sum", format!("{}", self.image_data.display()))
-            .context(format!("failed to calculate sha256 on {}", self.image_data.display()))?;
+        let output = util::exec_cmdline_with_output("sha256sum", self.image().display().to_string())
+            .context(format!("failed to calculate sha256 on {}", self.image().display()))?;
         let v: Vec<&str> = output.split_whitespace().collect();
         let shasum = v[0].trim().to_owned();
         info!("Sha256 of image data is {}", shasum);
@@ -94,11 +109,19 @@ impl UpdateBuilder {
         Ok(())
     }
 
+    fn prepend_empty_block(&mut self) -> Result<()> {
+        let tmpfile = self.image().with_extension("tmp");
+        let args = format!("if={} of={} bs=4096 seek=1 conv=sparse", self.image().display(), tmpfile.display());
+        util::exec_cmdline("/usr/bin/dd", args)?;
+        fs::rename(tmpfile, self.image())?;
+        Ok(())
+    }
+
     fn generate_verity(&mut self) -> Result<()> {
-        let hashfile = self.config.workdir_path(&format!("verity-hash-{}-{:03}", self.config.image_type(), self.config.version()));
+        let hashfile = self.config.workdir_path(self.verity_filename());
         let outfile = self.config.workdir_path("verity-format.out");
 
-        let verity = verity::generate_initial_hashtree(&self.image_data, &hashfile)?;
+        let verity = verity::generate_initial_hashtree(self.image(), &hashfile)?;
 
         fs::write(outfile, verity.output())
             .context("failed to write veritysetup command output to a file")?;
@@ -119,33 +142,30 @@ impl UpdateBuilder {
         self.verity_root = Some(root);
 
         Ok(())
-
     }
 
     fn compress_image(&self) -> Result<()> {
         if self.config.compress() {
             info!("Compressing image data");
-            util::exec_cmdline("xz", format!("-T0 {}", self.image_data.display()))
-                .context(format!("failed to compress {}", self.image_data.display()))?;
+            util::exec_cmdline("xz", format!("-T0 {}", self.image().display()))
+                .context(format!("failed to compress {}", self.image().display()))?;
             // Rename back to original image_data filename
-            let xz_filename = UpdateBuilder::target_filename(&self.config) + ".xz";
-            fs::rename(self.config.workdir_path(&xz_filename), &self.image_data)?;
+            fs::rename(self.image().with_extension("xz"), self.image())?;
         }
         Ok(())
     }
 
     fn write_final_image(&self) -> Result<()> {
         let header = self.generate_header()?;
-        let filename = format!("{}.img", UpdateBuilder::target_filename(&self.config));
-        let image_path = self.config.workdir_path(&filename);
+        let target = self.config.workdir_path(self.target_filename());
 
-        let mut out = File::create(&image_path)
-            .context(format!("could not open output file {}", image_path.display()))?;
+        let mut out = File::create(&target)
+            .context(format!("could not open output file {}", target.display()))?;
 
         header.write_header(&out)?;
 
-        let mut data = File::open(&self.image_data)
-            .context(format!("could not open image data file {}", self.image_data.display()))?;
+        let mut data = File::open(&self.image())
+            .context(format!("could not open image data file {}", self.image().display()))?;
         io::copy(&mut data, &mut out)
             .context("error copying image data to output file")?;
         Ok(())
@@ -185,6 +205,9 @@ impl UpdateBuilder {
         }
         if let Some(kid) = self.config.kernel_id() {
             writeln!(v, "kernel-id = \"{}\"", kid)?;
+        }
+        if let Some(name) = self.config.realmfs_name() {
+            writeln!(v, "realmfs-name = \"{}\"", name)?;
         }
         writeln!(v, "channel = \"{}\"", self.config.channel())?;
         writeln!(v, "version = {}", self.config.version())?;

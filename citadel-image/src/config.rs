@@ -21,6 +21,9 @@ pub struct BuildConfig {
     #[serde(rename = "kernel-id")]
     kernel_id: Option<String>,
 
+    #[serde(rename = "realmfs-name")]
+    realmfs_name: Option<String>,
+
     #[serde(skip)]
     basedir: PathBuf,
     #[serde(skip)]
@@ -62,7 +65,7 @@ impl BuildConfig {
 
     fn validate(&self) -> Result<()> {
         let itype = self.image_type.as_str();
-        if itype != "extra" && itype != "rootfs" && itype != "kernel" {
+        if itype != "extra" && itype != "rootfs" && itype != "kernel" && itype != "realmfs" {
             bail!("Invalid image type '{}'", self.image_type);
         };
         let src = Path::new(&self.source);
@@ -85,8 +88,8 @@ impl BuildConfig {
         &self.src_path
     }
 
-    pub fn workdir_path(&self, filename: &str) -> PathBuf {
-        self.basedir.join(filename)
+    pub fn workdir_path<P: AsRef<Path>>(&self, filename: P) -> PathBuf {
+        self.basedir.join(filename.as_ref())
     }
 
     pub fn img_name(&self) -> &str {
@@ -99,6 +102,10 @@ impl BuildConfig {
 
     pub fn kernel_id(&self) -> Option<&str> {
         self.kernel_id.as_ref().map(|s| s.as_str())
+    }
+
+    pub fn realmfs_name(&self) -> Option<&str> {
+        self.realmfs_name.as_ref().map(|s| s.as_str())
     }
 
     pub fn version(&self) -> usize {
