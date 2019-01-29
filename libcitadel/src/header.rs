@@ -1,5 +1,5 @@
 use std::cell::RefCell;
-use std::fs::File;
+use std::fs::{File,OpenOptions};
 use std::io::{Read, Write};
 use std::path::Path;
 
@@ -243,6 +243,10 @@ impl ImageHeader {
     pub fn write_header<W: Write>(&self, mut writer: W) -> Result<()> {
         writer.write_all(&self.0.borrow())?;
         Ok(())
+    }
+
+    pub fn write_header_to<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        self.write_header(OpenOptions::new().write(true).open(path.as_ref())?)
     }
 
     pub fn clear(&self) {
