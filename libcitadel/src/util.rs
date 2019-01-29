@@ -5,6 +5,8 @@ use libc::{self, c_char};
 use std::ffi::CStr;
 use std::str::from_utf8_unchecked;
 use std::env;
+use std::fs::File;
+use std::io::{self,Seek,Read,BufReader,SeekFrom};
 
 use failure::ResultExt;
 
@@ -84,6 +86,53 @@ pub fn sha256<P: AsRef<Path>>(path: P) -> Result<String> {
 
     let v: Vec<&str> = output.split_whitespace().collect();
     Ok(v[0].trim().to_owned())
+}
+
+pub enum FileRange {
+    All,
+    Offset(usize),
+    Range{offset: usize, len: usize},
+}
+
+fn ranged_reader<P: AsRef<Path>>(path: P, range: FileRange) -> Result<Box<dyn Read>> {
+    let mut f = File::open(path.as_ref())?;
+    let offset = match range {
+        FileRange::All => 0,
+        FileRange::Offset(n) => n,
+        FileRange::Range {offset, len: _} => offset,
+    };
+    if offset > 0 {
+        f.seek(SeekFrom::Start(offset as u64))?;
+    }
+    let r = BufReader::new(f);
+    if let FileRange::Range {offset: _, len} = range {
+        Ok(Box::new(r.take(len as u64)))
+    } else {
+        Ok(Box::new(r))
+    }
+}
+
+///
+/// Execute a command, pipe the contents of a file to stdin, return the output as a `String`
+///
+pub fn exec_cmdline_pipe_input<S,P>(cmd_path: &str, args: S, input: P, range: FileRange) -> Result<String>
+    where S: AsRef<str>, P: AsRef<Path>
+{
+    let mut r = ranged_reader(input.as_ref(), range)?;
+    ensure_command_exists(cmd_path)?;
+    let args: Vec<&str> = args.as_ref().split_whitespace().collect::<Vec<_>>();
+    let mut child = Command::new(cmd_path)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .context(format!("unable to execute {}", cmd_path))?;
+
+    let stdin = child.stdin.as_mut().unwrap();
+    io::copy(&mut r, stdin)?;
+    let output = child.wait_with_output()?;
+    Ok(String::from_utf8(output.stdout).unwrap().trim().to_owned())
 }
 
 pub fn xz_compress<P: AsRef<Path>>(path: P) -> Result<()> {
