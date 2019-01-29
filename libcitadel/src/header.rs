@@ -297,24 +297,35 @@ pub struct MetaInfo {
 struct MetaInfoToml {
     #[serde(rename = "image-type")]
     image_type: String,
+
+    #[serde(default)]
     channel: String,
+
     #[serde(rename = "kernel-version")]
     kernel_version: Option<String>,
+
     #[serde(rename = "kernel-id")]
     kernel_id: Option<String>,
+
     #[serde(rename = "realmfs-name")]
     realmfs_name: Option<String>,
+
+    #[serde(default)]
     version: u32,
+
+    #[serde(default)]
     timestamp: String,
-    #[serde(rename = "base-version")]
-    base_version: Option<u32>,
-    date: Option<String>,
-    gitrev: Option<String>,
+
+    #[serde(default)]
     nblocks: u32,
+
+    #[serde(default)]
     shasum: String,
-    #[serde(rename = "verity-salt")]
+
+    #[serde(default, rename = "verity-salt")]
     verity_salt: String,
-    #[serde(rename = "verity-root")]
+
+    #[serde(default, rename = "verity-root")]
     verity_root: String,
 }
 
@@ -361,14 +372,6 @@ impl MetaInfo {
 
     pub fn timestamp(&self) -> &str {
         &self.toml().timestamp
-    }
-
-    pub fn date(&self) -> Option<&str> {
-        self.toml().date.as_ref().map(|s| s.as_str())
-    }
-
-    pub fn gitrev(&self) -> Option<&str> {
-        self.toml().gitrev.as_ref().map(|s| s.as_str())
     }
 
     pub fn nblocks(&self) -> usize {
