@@ -298,6 +298,8 @@ struct MetaInfoToml {
     kernel_version: Option<String>,
     #[serde(rename = "kernel-id")]
     kernel_id: Option<String>,
+    #[serde(rename = "realmfs-name")]
+    realmfs_name: Option<String>,
     version: u32,
     timestamp: String,
     #[serde(rename = "base-version")]
@@ -346,6 +348,8 @@ impl MetaInfo {
     pub fn kernel_version(&self) -> Option<&str> { self.toml().kernel_version.as_ref().map(|s| s.as_str()) }
 
     pub fn kernel_id(&self) -> Option<&str> { self.toml().kernel_id.as_ref().map(|s| s.as_str()) }
+
+    pub fn realmfs_name(&self) -> Option<&str> { self.toml().realmfs_name.as_ref().map(|s| s.as_str()) }
 
     pub fn version(&self) -> u32 {
         self.toml().version
