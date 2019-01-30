@@ -89,11 +89,6 @@ impl RealmManager {
             warn!("ignoring directory in realm storage which has invalid realm name: {}", realm_name);
             return Ok(())
         }
-        let rootfs = path.join("rootfs");
-        if !rootfs.exists() {
-            warn!("realm directory {} does not have a rootfs, ignoring", path.display());
-            return Ok(())
-        }
 
         match Realm::new(realm_name, self.symlinks.clone(), self.network.clone()) {
             Ok(realm) => { self.add_realm_entry(realm);} ,
