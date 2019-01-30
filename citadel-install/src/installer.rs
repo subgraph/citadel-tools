@@ -6,6 +6,9 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
+use libcitadel::util::{mount,exec_cmdline_with_output};
+use libcitadel::RealmFS;
+
 use super::util;
 use super::Result;
 
@@ -24,6 +27,7 @@ const BTRFS: &str = "/bin/btrfs";
 const MOUNT: &str = "/bin/mount";
 const UMOUNT: &str = "/bin/umount";
 const CHOWN: &str = "/bin/chown";
+const CP: &str = "/bin/cp";
 const TAR: &str = "/bin/tar";
 const XZ: &str = "/bin/xz";
 const DD: &str = "/bin/dd";
@@ -40,31 +44,72 @@ const DEFAULT_ARTIFACT_DIRECTORY: &str = "/run/images";
 
 const KERNEL_CMDLINE: &str = "add_efi_memmap intel_iommu=off cryptomgr.notests rcupdate.rcu_expedited=1 rcu_nocbs=0-64 tsc=reliable no_timer_check noreplace-smp i915.fastboot=1 quiet splash";
 
+const MAIN_REALM_CONFIG: &str =
+r###"\
+realmfs = "main"
+realmfs-write = true
+"###;
+
+const LIVE_REALM_CONFIG: &str =
+r###"\
+realmfs = "base"
+realmfs-write = false
+"###;
+
+
+#[derive(PartialEq)]
+enum InstallType {
+    LiveSetup,
+    Install,
+}
+
 pub struct Installer {
+    _type: InstallType,
     install_syslinux: bool,
-    target_device: String,
-    passphrase: String,
+    storage_base: PathBuf,
+    target_device: Option<PathBuf>,
+    passphrase: Option<String>,
     artifact_directory: String,
     logfile: Option<RefCell<File>>,
 }
 
 impl Installer {
-    pub fn new() -> Installer {
+    pub fn new<P: AsRef<Path>>(target_device: P, passphrase: &str) -> Installer {
+        let target_device = Some(target_device.as_ref().to_owned());
+        let passphrase = Some(passphrase.to_owned());
         Installer {
+            _type: InstallType::Install,
             install_syslinux: true,
-            target_device: String::new(),
-            passphrase: String::new(),
+            storage_base: PathBuf::from(INSTALL_MOUNT),
+            target_device,
+            passphrase,
             artifact_directory: DEFAULT_ARTIFACT_DIRECTORY.to_string(),
             logfile: None,
         }
     }
 
-    pub fn set_target(&mut self, target: &str) {
-        self.target_device = target.to_owned()
+    pub fn new_livesetup() -> Installer {
+        Installer {
+            _type: InstallType::LiveSetup,
+            install_syslinux: false,
+            storage_base: PathBuf::from("/sysroot/storage"),
+            target_device: None,
+            passphrase: None,
+            artifact_directory: DEFAULT_ARTIFACT_DIRECTORY.to_string(),
+            logfile: None,
+        }
     }
 
-    pub fn set_passphrase(&mut self, passphrase: &str) {
-        self.passphrase = passphrase.to_owned()
+    fn target(&self) -> &Path {
+        self.target_device.as_ref().expect("No target device")
+    }
+
+    fn passphrase(&self) -> &str {
+        self.passphrase.as_ref().expect("No passphrase")
+    }
+
+    fn storage(&self) -> &Path {
+        &self.storage_base
     }
 
     pub fn set_install_syslinux(&mut self, val: bool) {
@@ -83,14 +128,8 @@ impl Installer {
             kernel_img.as_str(), EXTRA_IMAGE_NAME,
         ];
 
-        if self.target_device.is_empty() {
-            bail!("No target device set in install configuration");
-        }
-        if self.passphrase.is_empty() {
-            bail!("No passphrase set in install configuration");
-        }
-        if !Path::new(&self.target_device).exists() {
-            bail!("Target device {} does not exist", self.target_device);
+        if !self.target().exists() {
+            bail!("Target device {} does not exist", self.target().display());
         }
 
         for tool in tools {
@@ -105,65 +144,85 @@ impl Installer {
             }
         }
 
-        if !self.artifact_path("appimg-rootfs.tar").exists() && !self.artifact_path("appimg-rootfs.tar.xz").exists() {
-            bail!("Required component appimg-rootfs.tar(.xz) does not exist in  {}",self.artifact_directory);
-        }
-
         Ok(())
     }
 
     pub fn run(&self) -> Result<()> {
+        match self._type {
+            InstallType::Install => self.run_install(),
+            InstallType::LiveSetup => self.run_live_setup(),
+        }
+    }
+
+    pub fn run_install(&self) -> Result<()> {
         let start = Instant::now();
-
-        fs::create_dir_all(INSTALL_MOUNT)?;
-
         self.partition_disk()?;
         self.setup_luks()?;
         self.setup_lvm()?;
-
         self.setup_boot()?;
-
         self.create_storage()?;
-
-        self.output("\n")?;
-        self.header("Installing rootfs partitions\n")?;
-        let rootfs = self.artifact_path("citadel-rootfs.img");
-        self.cmd(CITADEL_IMAGE, format!("install-rootfs --skip-sha {}", rootfs.display()))?;
-        self.cmd(CITADEL_IMAGE, format!("install-rootfs --skip-sha --no-prefer {}", rootfs.display()))?;
-
-        self.cmd(LSBLK, format!("-o NAME,SIZE,TYPE,FSTYPE {}", &self.target_device))?;
-
-        self.cmd(VGCHANGE, "-an citadel")?;
-        self.cmd(CRYPTSETUP, "luksClose luks-install")?;
-
+        self.install_rootfs_partitions()?;
+        self.finish_install()?;
         self.header(format!("Install completed successfully in {} seconds", start.elapsed().as_secs()))?;
-
         Ok(())
     }
 
-    pub fn live_setup(&self) -> Result<()> {
+
+    pub fn run_live_setup(&self) -> Result<()> {
         self.cmd(MOUNT, "-t tmpfs var-tmpfs /sysroot/var")?;
         self.cmd(MOUNT, "-t tmpfs home-tmpfs /sysroot/home")?;
-        let _ = fs::read("/sys/class/zram-control/hot_add")?;
-        // Create an 8gb zram disk to use as  /storage partition
-        fs::write("/sys/block/zram1/comp_algorithm", "lz4")?;
-        fs::write("/sys/block/zram1/disksize", "8G")?;
-        self.cmd(MKFS_BTRFS, "/dev/zram1")?;
-        self.cmd(MOUNT, "/dev/zram1 /sysroot/storage")?;
+        self.cmd(MOUNT, "-t tmpfs storage-tmpfs /sysroot/storage")?;
         fs::create_dir_all("/sysroot/storage/realms")?;
         self.cmd(MOUNT, "--bind /sysroot/storage/realms /sysroot/realms")?;
 
         let cmdline = fs::read_to_string("/proc/cmdline")?;
         if cmdline.contains("citadel.live") {
-            self.setup_storage(Path::new("/sysroot/storage"), false)?;
+            self.setup_live_realm()?;
         }
+        Ok(())
+    }
 
+    fn setup_live_realm(&self) -> Result<()> {
+        self.cmd(CITADEL_IMAGE, format!("decompress /run/images/base-realmfs.img"))?;
+        let realmfs_dir = self.storage().join("realms/realmfs-images");
+        let base_realmfs = realmfs_dir.join("base-realmfs.img");
+
+        self.info(format!("creating directory {}", realmfs_dir.display()))?;
+        fs::create_dir_all(&realmfs_dir)?;
+
+        self.info(format!("creating symlink {} -> {}", base_realmfs.display(), "/run/images/base-realmfs.img"))?;
+        unixfs::symlink("/run/images/base-realmfs.img", &base_realmfs)?;
+        self.mount_realmfs()?;
+
+        self.setup_storage()?;
+
+        /*
+        self.setup_main_realm()?;
+        fs::write(self.storage().join("realms/realm-main/config"), "realmfs = \"base\"")?;
+        let rootfs = self.storage().join("realms/realm-main/rootfs");
+        fs::remove_file(&rootfs)?;
+        unixfs::symlink("/run/images/base-realmfs.mountpoint", &rootfs)?;
+
+        self.info("Creating /Shared realms directory")?;
+        fs::create_dir_all(self.storage().join("realms/Shared"))?;
+        self.cmd(CHOWN, format!("1000:1000 {}/realms/Shared", self.storage().display()))?;
+        */
+        Ok(())
+    }
+
+    pub fn mount_realmfs(&self) -> Result<()> {
+        self.info("Creating loop device for /run/images/base-realmfs.img")?;
+        let args = format!("--offset 4096 -f --show /run/images/base-realmfs.img");
+        let loopdev = exec_cmdline_with_output("/sbin/losetup", args)?;
+        self.info("Mounting image at /run/images/base-realmfs.mountpoint")?;
+        fs::create_dir_all("/run/images/base-realmfs.mountpoint")?;
+        mount(&loopdev, "/run/images/base-realmfs.mountpoint", Some("-oro"))?;
         Ok(())
     }
 
     fn partition_disk(&self) -> Result<()> {
         self.header("Partitioning target disk")?;
-        self.cmd(BLKDEACTIVATE, &self.target_device)?;
+        self.cmd(BLKDEACTIVATE, self.target().display().to_string())?;
         self.parted("mklabel gpt")?;
         self.parted("mkpart boot fat32 1MiB 513MiB")?;
         self.parted("set 1 boot on")?;
@@ -173,13 +232,14 @@ impl Installer {
     }
 
     fn parted(&self, cmdline: &str) -> Result<()> {
-        let args = format!("-s {} {}", self.target_device, cmdline);
+        let args = format!("-s {} {}", self.target().display(), cmdline);
         self.cmd(PARTED, args)
     }
 
     fn setup_luks(&self) -> Result<()> {
         self.header("Setting up LUKS disk encryption")?;
-        fs::write(LUKS_PASSPHRASE_FILE, self.passphrase.as_bytes())?;
+        fs::create_dir_all(INSTALL_MOUNT)?;
+        fs::write(LUKS_PASSPHRASE_FILE, self.passphrase().as_bytes())?;
         let luks_partition = self.target_partition(2);
 
         let args = format!(
@@ -278,7 +338,7 @@ impl Installer {
         if !mbrbin.exists() {
             bail!("Could not find MBR image: {}", mbrbin.display());
         }
-        let args = format!("bs=440 count=1 conv=notrunc if={} of={}", mbrbin.display(), self.target_device);
+        let args = format!("bs=440 count=1 conv=notrunc if={} of={}", mbrbin.display(), self.target().display());
         self.cmd(DD, args)?;
         self.parted("set 1 legacy_boot on")?;
         Ok(())
@@ -304,77 +364,120 @@ impl Installer {
         self.header("Setting up /storage partition")?;
         self.cmd(MKFS_BTRFS, "/dev/mapper/citadel-storage")?;
         self.cmd(MOUNT, format!("/dev/mapper/citadel-storage {}", INSTALL_MOUNT))?;
-        self.setup_storage(Path::new(INSTALL_MOUNT), true)?;
+        self.setup_storage()?;
         self.cmd(UMOUNT, INSTALL_MOUNT)?;
         Ok(())
     }
 
-    fn setup_storage(&self, base: &Path, copy_resources: bool) -> Result<()> {
-        if copy_resources {
-            self.setup_storage_resources(base)?;
+    fn setup_storage(&self) -> Result<()> {
+        if self._type == InstallType::Install {
+            self.setup_storage_resources()?;
+            self.setup_base_realmfs()?;
         }
 
-        self.setup_base_appimg(base)?;
-        self.setup_main_realm(base)?;
+        self.setup_main_realm()?;
 
         self.info("Creating /Shared realms directory")?;
-        fs::create_dir_all(base.join("realms/Shared"))?;
-        self.cmd(CHOWN, format!("1000:1000 {}/realms/Shared", base.display()))?;
+        fs::create_dir_all(self.storage().join("realms/Shared"))?;
+        self.cmd(CHOWN, format!("1000:1000 {}/realms/Shared", self.storage().display()))?;
 
         Ok(())
     }
 
-    fn setup_base_appimg(&self, base: &Path) -> Result<()> {
-        self.header("Unpacking appimg rootfs")?;
-        let appimg_dir = base.join("appimg");
-        fs::create_dir_all(&appimg_dir)?;
-        self.cmd(BTRFS, format!("subvolume create {}/base.appimg", appimg_dir.display()))?;
+    fn setup_base_realmfs(&self) -> Result<()> {
+        let realmfs_dir = self.storage().join("realms/realmfs-images");
+        fs::create_dir_all(&realmfs_dir)?;
+        self.sparse_copy_artifact("base-realmfs.img", &realmfs_dir)?;
+        self.cmd(CITADEL_IMAGE, format!("decompress {}/base-realmfs.img", realmfs_dir.display()))?;
 
-        let xz_rootfs = self.artifact_path("appimg-rootfs.tar.xz");
-        if xz_rootfs.exists() {
-            self.cmd(XZ, format!("-d {}", xz_rootfs.display()))?;
-        }
-        let rootfs_bundle = self.artifact_path("appimg-rootfs.tar");
-        self.cmd(TAR, format!("-C {}/base.appimg -xf {}", appimg_dir.display(), rootfs_bundle.display()))?;
-
+        self.info("Creating main-realmfs as fork of base-realmfs")?;
+        let base_path = realmfs_dir.join("base-realmfs.img");
+        let base_image = RealmFS::load_from_path(base_path, "base")?;
+        base_image.fork("main")?;
+        fs::write(self.storage().join("realms/config"), "realmfs=\"main\"\n")?;
         Ok(())
     }
 
-    fn setup_main_realm(&self, base: &Path) -> Result<()> {
+    fn setup_main_realm(&self) -> Result<()> {
         self.header("Creating main realm")?;
 
-        let realm = base.join("realms/realm-main");
-        let home = realm.join("home");
+        let realm = self.storage().join("realms/realm-main");
 
         self.info("Creating home directory /realms/realm-main/home")?;
+        let home = realm.join("home");
         fs::create_dir_all(&home)?;
 
-        self.cmd(BTRFS, format!("subvolume snapshot {}/appimg/base.appimg {}/rootfs",
-                                base.display(), realm.display()))?;
-
         self.info("Copying .bashrc and .profile into home diectory")?;
-        fs::copy(realm.join("rootfs/home/user/.bashrc"), home.join(".bashrc"))?;
-        fs::copy(realm.join("rootfs/home/user/.profile"), home.join(".profile"))?;
+        fs::copy(self.skel().join("bashrc"), home.join(".bashrc"))?;
+        fs::copy(self.skel().join("profile"), home.join(".profile"))?;
 
         self.cmd(CHOWN, format!("-R 1000:1000 {}", home.display()))?;
 
+        self.info("Creating main realm config file")?;
+        fs::write(realm.join("config"), self.main_realm_config())?;
+
+        /*
+        self.info("Creating rootfs symlink")?;
+        unixfs::symlink(
+            format!("/run/images/{}-realmfs.mountpoint", self.main_realmfs()),
+            format!("{}/rootfs", realm.display()))?;
+        */
+
         self.info("Creating default.realm symlink")?;
-        unixfs::symlink("realm-main", base.join("realms/default.realm"))?;
+        unixfs::symlink("realm-main", self.storage().join("realms/default.realm"))?;
 
         Ok(())
     }
 
-    fn setup_storage_resources(&self, base: &Path) -> Result<()> {
+    fn setup_storage_resources(&self) -> Result<()> {
         let channel = util::rootfs_channel();
-        let resources = base.join("resources").join(channel);
+        let resources = self.storage().join("resources").join(channel);
         fs::create_dir_all(&resources)?;
 
-        self.copy_artifact(EXTRA_IMAGE_NAME, &resources)?;
+        self.sparse_copy_artifact(EXTRA_IMAGE_NAME, &resources)?;
 
         let kernel_img = self.kernel_imagename();
-        self.copy_artifact(&kernel_img, &resources)?;
+        self.sparse_copy_artifact(&kernel_img, &resources)?;
 
         Ok(())
+    }
+
+    fn install_rootfs_partitions(&self) -> Result<()> {
+        self.header("Installing rootfs partitions")?;
+        let rootfs = self.artifact_path("citadel-rootfs.img");
+        self.cmd(CITADEL_IMAGE, format!("install-rootfs --skip-sha {}", rootfs.display()))?;
+        self.cmd(CITADEL_IMAGE, format!("install-rootfs --skip-sha --no-prefer {}", rootfs.display()))?;
+        Ok(())
+    }
+
+    fn finish_install(&self) -> Result<()> {
+        self.cmd(LSBLK, format!("-o NAME,SIZE,TYPE,FSTYPE {}", self.target().display()))?;
+        self.cmd(VGCHANGE, "-an citadel")?;
+        self.cmd(CRYPTSETUP, "luksClose luks-install")?;
+        Ok(())
+    }
+
+    fn main_realm_config(&self) -> &str {
+        match self._type {
+            InstallType::Install => MAIN_REALM_CONFIG,
+            InstallType::LiveSetup => LIVE_REALM_CONFIG,
+        }
+    }
+
+    /*
+    fn main_realmfs(&self) -> &str {
+        match self._type {
+            InstallType::Install => "main",
+            InstallType::LiveSetup => "base",
+        }
+    }
+    */
+
+    fn skel(&self) -> &Path{
+        match self._type {
+            InstallType::Install => Path::new("/etc/skel"),
+            InstallType::LiveSetup => Path::new("/sysroot/etc/skel"),
+        }
     }
 
     fn kernel_imagename(&self) -> String {
@@ -384,7 +487,7 @@ impl Installer {
     }
 
     fn target_partition(&self, num: usize) -> String {
-        format!("{}{}", self.target_device, num)
+        format!("{}{}", self.target().display(), num)
     }
 
     fn artifact_path(&self, filename: &str) -> PathBuf {
@@ -392,6 +495,14 @@ impl Installer {
     }
 
     fn copy_artifact<P: AsRef<Path>>(&self, filename: &str, target: P) -> Result<()> {
+        self._copy_artifact(filename, target, false)
+    }
+
+    fn sparse_copy_artifact<P: AsRef<Path>>(&self, filename: &str, target: P) -> Result<()> {
+        self._copy_artifact(filename, target, true)
+    }
+
+    fn _copy_artifact<P: AsRef<Path>>(&self, filename: &str, target: P, sparse: bool) -> Result<()> {
         self.info(format!("Copying {} to {}", filename, target.as_ref().display()))?;
         let src = self.artifact_path(filename);
         let target = target.as_ref();
@@ -399,9 +510,14 @@ impl Installer {
             fs::create_dir_all(target)?;
         }
         let dst = target.join(filename);
-        fs::copy(src, dst)?;
+        if sparse {
+            self.cmd(CP, format!("--sparse=always {} {}", src.display(), dst.display()))?;
+        } else {
+            fs::copy(src, dst)?;
+        }
         Ok(())
     }
+
 
     fn header<S: AsRef<str>>(&self, s: S) -> Result<()> {
         self.output(format!("\n[+] {}\n", s.as_ref()))

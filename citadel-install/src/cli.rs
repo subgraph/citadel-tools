@@ -43,9 +43,7 @@ pub fn run_cli_install_with<P: AsRef<Path>>(target: P) -> Result<bool> {
 }
 
 fn run_install(disk: Disk, passphrase: String) -> Result<()> {
-    let mut install = Installer::new();
-    install.set_target(disk.path().to_str().unwrap());
-    install.set_passphrase(&passphrase);
+    let mut install = Installer::new(disk.path(), &passphrase);
     install.set_install_syslinux(true);
     install.verify()?;
     install.run()
