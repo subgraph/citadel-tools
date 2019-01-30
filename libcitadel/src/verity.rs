@@ -1,9 +1,11 @@
 use std::path::{Path,PathBuf};
 use std::collections::HashMap;
 use std::process::{Command, Stdio};
+use std::fs::{self, OpenOptions,File};
+use std::io;
 
 use failure::ResultExt;
-use crate::{Result,ImageHeader,MetaInfo,Partition,util};
+use crate::{Result,MetaInfo,Partition,util};
 
 const VERITYSETUP: &str = "/sbin/veritysetup";
 const LOSETUP: &str = "/sbin/losetup";
@@ -18,47 +20,78 @@ pub fn generate_initial_hashtree<P: AsRef<Path>, Q:AsRef<Path>>(source: P, hasht
     Ok(VerityOutput::parse(&output))
 }
 
-
 pub fn generate_image_hashtree<P: AsRef<Path>>(image: P, metainfo: &MetaInfo) -> Result<VerityOutput> {
-    let args = format!("--hash-offset={} --data-blocks={} --salt={} format {} {}",
-                       metainfo.nblocks() * 4096, metainfo.nblocks(), metainfo.verity_salt(),
-                       image.as_ref().display(), image.as_ref().display());
+    let verityfile = image.as_ref().with_extension("verity");
 
-    let output = util::exec_cmdline_with_output(VERITYSETUP, args)
-        .context("Failed to generate hashtree with veritysetup")?;
+    // Make sure file size is correct or else verity tree will be appended in wrong place
+    let meta = image.as_ref().metadata()?;
+    let len = meta.len() as usize;
+    let expected = (metainfo.nblocks() + 1) * 4096;
+    if len != expected {
+        bail!("Actual file size ({}) does not match expected size ({})", len, expected);
+    }
 
-    // XXX check that root hash matches
+    let vout = with_loopdev(image.as_ref(), |loopdev| {
+        let args = format!("--data-blocks={} --salt={} format {} {}",
+                           metainfo.nblocks(), metainfo.verity_salt(),
+                           loopdev, verityfile.display());
 
-    Ok(VerityOutput::parse(&output))
+        let output = util::exec_cmdline_with_output(VERITYSETUP, args)?;
+        Ok(VerityOutput::parse(&output))
+    })?;
+
+    let mut input = File::open(&verityfile)?;
+    let mut output = OpenOptions::new().append(true).open(image.as_ref())?;
+    io::copy(&mut input, &mut output)?;
+    fs::remove_file(&verityfile)?;
+
+    Ok(vout)
 }
 
 pub fn verify_image<P: AsRef<Path>>(image: P, metainfo: &MetaInfo) -> Result<bool> {
-    let arg_offset = format!("--hash-offset={}", metainfo.nblocks() * 4096);
-    let image = format!("{}", image.as_ref().display());
-
-
-    let status = Command::new(VERITYSETUP)
-        .args(&[ arg_offset.as_str(), "verify", image.as_str(), image.as_str(), metainfo.verity_root()])
-        .stderr(Stdio::inherit())
-        .status()?;
-
-    Ok(status.success())
+    with_loopdev(image.as_ref(), |loopdev| {
+        let status = Command::new(VERITYSETUP)
+            .arg(format!("--hash-offset={}", metainfo.nblocks() * 4096))
+            .arg("verify")
+            .arg(&loopdev)
+            .arg(&loopdev)
+            .arg(metainfo.verity_root())
+            .stderr(Stdio::inherit())
+            .status()?;
+        Ok(status.success())
+    })
 }
 
-pub fn setup_image_device<P: AsRef<Path>>(image: P) -> Result<PathBuf> {
-    let header = ImageHeader::from_file(image.as_ref())?;
-    let metainfo = header.metainfo()?;
 
+
+pub fn setup_image_device<P: AsRef<Path>>(image: P, metainfo: &MetaInfo) -> Result<PathBuf> {
     let devname = if metainfo.image_type() == "rootfs" {
         String::from("rootfs")
+    } else if metainfo.image_type() == "realmfs" {
+        let name = metainfo.realmfs_name()
+            .ok_or(format_err!("Cannot set up dm-verity on a realmfs '{}' because it has no name field in metainfo",
+                 image.as_ref().display()))?;
+        format!("verity-realmfs-{}", name)
     } else {
         format!("verity-{}", metainfo.image_type())
     };
 
-    let loopdev = create_image_loop_device(image.as_ref())?;
-
-    setup_device(&loopdev, &devname, metainfo.nblocks(), metainfo.verity_root())
+    with_loopdev(image.as_ref(), |loopdev| {
+        setup_device(&loopdev, &devname, metainfo.nblocks(), metainfo.verity_root())
+    })
 }
+
+fn with_loopdev<F,R>(image: &Path, f: F) -> Result<R>
+    where F: FnOnce(&str) -> Result<R>
+{
+    let loopdev = create_image_loop_device(image.as_ref())?;
+    let result = f(&loopdev);
+    let result_losetup = util::exec_cmdline(LOSETUP, format!("-d {}", loopdev));
+    let r = result?;
+    result_losetup.context("Error removing loop device created to generate verity tree")?;
+    Ok(r)
+}
+
 
 pub fn setup_partition_device(partition: &Partition) -> Result<PathBuf> {
     let metainfo = partition.header().metainfo()?;
