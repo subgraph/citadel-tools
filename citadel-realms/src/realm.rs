@@ -5,9 +5,10 @@ use std::cell::{RefCell,Cell};
 use std::fs::{self,File};
 use std::os::unix::fs::{symlink,MetadataExt};
 
-use crate::{RealmConfig,Result,Systemd,NetworkConfig};
+use libcitadel::{CommandLine,RealmFS};
+
+use crate::{RealmConfig,Result,Systemd,NetworkConfig,GLOBAL_CONFIG};
 use crate::util::*;
-use crate::appimg::*;
 
 const REALMS_BASE_PATH: &str = "/realms";
 const REALMS_RUN_PATH: &str = "/run/realms";
@@ -45,8 +46,7 @@ impl Realm {
 
     fn load_config(&mut self) -> Result<()> {
         let path = self.base_path().join("config");
-        self.config = RealmConfig::load_or_default(&path)
-            .map_err(|e| format_err!("failed to load realm config file {}: {}", path.display(), e))?;
+        self.config = RealmConfig::load_or_default(&path);
         Ok(())
     }
 
@@ -105,9 +105,87 @@ impl Realm {
     }
 
     pub fn start(&self) -> Result<()> {
+        self.setup_realmfs(self.config.realmfs())?;
         self.systemd.start_realm(self)?;
         info!("Started realm '{}'", self.name());
         Ok(())
+    }
+
+    fn setup_realmfs(&self, name: &str) -> Result<()> {
+        let mut realmfs = self.get_named_realmfs(name)?;
+        self.setup_rootfs_link(&realmfs)?;
+
+        info!("Starting realm with realmfs = {}", name);
+        if !realmfs.is_mounted() {
+            if realmfs.is_sealed() {
+                realmfs.mount_verity()?;
+            } else {
+                if CommandLine::sealed() {
+                    bail!("Cannot start realm because realmfs {} is not sealed and citadel.sealed is set", name);
+                }
+                realmfs.mount_rw()?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Return named RealmFS instance if it already exists.
+    /// Otherwise, create it as a fork of the 'default' image.
+    /// The default image is either 'base' or some other name
+    /// from the global realm config file.
+    ///
+    /// If the default image does not exist, then create that too
+    /// as a fork of 'base' image.
+    fn get_named_realmfs(&self, name: &str) -> Result<RealmFS> {
+        if RealmFS::named_image_exists(name) {
+            return RealmFS::load_by_name(name);
+        }
+
+        if CommandLine::sealed() {
+            bail!("Realm {} needs RealmFS {} which does not exist and cannot be created in sealed realmfs mode", self.name(), name);
+        }
+
+        let default = GLOBAL_CONFIG.realmfs();
+
+        let default_image = if RealmFS::named_image_exists(default) {
+            RealmFS::load_by_name(default)?
+        } else {
+            // If default image name is something other than 'base' and does
+            // not exist, create it as a fork of 'base'
+            let base = RealmFS::load_by_name("base")?;
+            base.fork(default)?
+        };
+
+        // Requested name might be the default image that was just created, if so return it.
+        let image = if name == default {
+            default_image
+        } else {
+            default_image.fork(name)?
+        };
+        Ok(image)
+    }
+
+    // Make sure rootfs in realm directory is a symlink pointing to the correct realmfs mountpoint
+    fn setup_rootfs_link(&self, realmfs: &RealmFS) -> Result<()> {
+        let mountpoint = realmfs.mountpoint();
+        let rootfs = self.base_path().join("rootfs");
+
+        if rootfs.exists() {
+            let link = fs::read_link(&rootfs)?;
+            if link == mountpoint {
+                return Ok(())
+            }
+            fs::remove_file(&rootfs)?;
+        }
+        symlink(mountpoint, rootfs)?;
+        Ok(())
+    }
+
+    pub fn readonly_rootfs(&self) -> bool {
+        if CommandLine::sealed() {
+            return true
+        }
+        !self.config.realmfs_write()
     }
 
     pub fn stop(&self) -> Result<()> {
@@ -158,9 +236,6 @@ impl Realm {
         self.create_home_directory()
             .map_err(|e| format_err!("failed to create realm home directory {}: {}", self.base_path().join("home").display(), e))?;
 
-        // This must be last step because if an error is returned caller assumes that subvolume was
-        // never created and does not need to be removed.
-        clone_base_appimg(self)?;
         Ok(())
     }
 
@@ -183,8 +258,6 @@ impl Realm {
         if self.is_running()? {
             self.stop()?;
         }
-        info!("removing rootfs subvolume for '{}'", self.name());
-        delete_rootfs_subvolume(self)?;
 
         info!("removing realm directory {}", self.base_path().display());
         fs::remove_dir_all(self.base_path())?;

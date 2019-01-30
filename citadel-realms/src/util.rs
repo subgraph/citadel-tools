@@ -42,7 +42,7 @@ const MAX_REALM_NAME_LEN:usize = 128;
 ///   * may only contain ascii characters which are letters, numbers, or the dash '-' symbol 
 ///   * must not be empty or have a length exceeding 128 characters
 pub fn is_valid_realm_name(name: &str) -> bool {
-    name.len() <= MAX_REALM_NAME_LEN && 
+    name.len() <= MAX_REALM_NAME_LEN &&
         // Also false on empty string
         is_first_char_alphabetic(name) && 
         name.chars().all(is_alphanum_or_dash)

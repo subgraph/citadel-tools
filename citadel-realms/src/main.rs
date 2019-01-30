@@ -1,5 +1,6 @@
 #[macro_use] extern crate failure;
 #[macro_use] extern crate serde_derive;
+#[macro_use] extern crate lazy_static;
 
 use failure::Error;
 use clap::{App,Arg,ArgMatches,SubCommand};
@@ -33,13 +34,15 @@ mod util;
 mod systemd;
 mod config;
 mod network;
-mod appimg;
+
+use libcitadel::RealmFS;
 
 use crate::realm::{Realm,RealmSymlinks};
 use crate::manager::RealmManager;
 use crate::config::RealmConfig;
 use crate::systemd::Systemd;
 use crate::network::NetworkConfig;
+use crate::config::GLOBAL_CONFIG;
 
 fn main() {
     let app = App::new("citadel-realms")
@@ -118,7 +121,7 @@ fn main() {
                          .long("appimg")
                          .help("Name of application image in /storage/appimg directory. Default is to use base.appimg")
                          .takes_value(true)))
-                    
+
 
         .subcommand(SubCommand::with_name("new")
                     .arg(Arg::with_name("help").long("help").hidden(true))

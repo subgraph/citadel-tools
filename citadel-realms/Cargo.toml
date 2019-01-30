@@ -6,6 +6,7 @@ homepage = "http://github.com/subgraph/citadel"
 edition = "2018"
 
 [dependencies]
+libcitadel = { path = "../libcitadel" }
 libc = "0.2"
 clap = "2.30.0"
 failure = "0.1.1"
@@ -14,3 +15,4 @@ serde_derive = "1.0.27"
 serde = "1.0.27"
 termcolor = "0.3"
 walkdir = "2"
+lazy_static = "1.2.0"

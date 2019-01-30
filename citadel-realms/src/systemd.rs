@@ -283,9 +283,9 @@ impl Systemd {
 
     fn generate_nspawn_file(&self, realm: &Realm) -> Result<String> {
         Ok(NSPAWN_FILE_TEMPLATE
-           .replace("$EXTRA_BIND_MOUNTS", &self.generate_extra_bind_mounts(realm)?)
-
-           .replace("$NETWORK_CONFIG", &self.generate_network_config(realm)?))
+            .replace("$EXTRA_BIND_MOUNTS", &self.generate_extra_bind_mounts(realm)?)
+            .replace("$EXTRA_FILE_OPTIONS", &self.generate_extra_file_options(realm)?)
+            .replace("$NETWORK_CONFIG", &self.generate_network_config(realm)?))
     }
 
     fn generate_extra_bind_mounts(&self, realm: &Realm) -> Result<String> {
@@ -327,6 +327,15 @@ impl Systemd {
         Ok(s)
     }
 
+    fn generate_extra_file_options(&self, realm: &Realm) -> Result<String> {
+        let mut s = String::new();
+        if realm.readonly_rootfs() {
+            writeln!(s, "ReadOnly=true")?;
+            writeln!(s, "Overlay=+/var::/var")?;
+        }
+        Ok(s)
+    }
+
     fn generate_network_config(&self, realm: &Realm) -> Result<String> {
         let mut s = String::new();
         if realm.config().network() {
@@ -363,6 +372,8 @@ BindReadOnly=/storage/citadel-state/resolv.conf:/etc/resolv.conf
 
 $EXTRA_BIND_MOUNTS
 
+$EXTRA_FILE_OPTIONS
+
 "###;
 
 pub const REALM_SERVICE_TEMPLATE: &str = r###"
@@ -372,7 +383,7 @@ Wants=citadel-desktopd.service
 
 [Service]
 Environment=SYSTEMD_NSPAWN_SHARE_NS_IPC=1
-ExecStart=/usr/bin/systemd-nspawn --quiet --notify-ready=yes --keep-unit --machine=$REALM_NAME --link-journal=try-guest --directory=$ROOTFS
+ExecStart=/usr/bin/systemd-nspawn --quiet --notify-ready=yes --keep-unit --machine=$REALM_NAME --link-journal=auto --directory=$ROOTFS
 
 KillMode=mixed
 Type=notify
