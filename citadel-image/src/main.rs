@@ -4,6 +4,7 @@
 
 use std::process::exit;
 use std::path::Path;
+use std::fs;
 
 use clap::{App,Arg,SubCommand,ArgMatches};
 use clap::AppSettings::*;
@@ -65,9 +66,12 @@ fn main() {
                 .required(true)
                 .help("Path to image file")))
 
-    .subcommand(SubCommand::with_name("verify-shasum")
-        .about("Verify the sha256 sum of the image")
-        .arg(Arg::with_name("path")
+        .subcommand(SubCommand::with_name("bless")
+            .about("Mark currently mounted rootfs partition as successfully booted"))
+
+        .subcommand(SubCommand::with_name("verify-shasum")
+            .about("Verify the sha256 sum of the image")
+            .arg(Arg::with_name("path")
             .required(true)
             .help("Path to image file")));
 
@@ -84,6 +88,8 @@ fn main() {
         ("decompress", Some(m)) => decompress(m),
         ("verify-shasum", Some(m)) => verify_shasum(m),
         ("install-rootfs", Some(m)) => install_rootfs(m),
+        ("install", Some(m)) => install_image(m),
+        ("bless", Some(_)) => bless(),
         _ => Ok(()),
     };
 
@@ -194,6 +200,63 @@ fn sign_image(arg_matches: &ArgMatches) -> Result<()> {
     Ok(())
 }
 
+fn install_image(arg_matches: &ArgMatches) -> Result<()> {
+    let source = arg_matches.value_of("path").expect("path argument missing");
+    let img = load_image(arg_matches)?;
+    let _hdr = img.header();
+    let metainfo = img.metainfo();
+
+    // XXX verify signature?
+
+    if !(metainfo.image_type() == "kernel" || metainfo.image_type() == "extra") {
+        bail!("Cannot install image type {}", metainfo.image_type());
+    }
+
+    let shasum = img.generate_shasum()?;
+    if shasum != img.metainfo().shasum() {
+        bail!("Image shasum does not match metainfo");
+    }
+
+    img.generate_verity_hashtree()?;
+
+    let filename = if metainfo.image_type() == "kernel" {
+        let kernel_version = match metainfo.kernel_version() {
+            Some(version) => version,
+            None => bail!("Kernel image does not have a kernel version field in metainfo"),
+        };
+        if kernel_version.chars().any(|c| c == '/') {
+            bail!("Kernel version field has / char");
+        }
+        format!("citadel-kernel-{}-{:03}.img", kernel_version, metainfo.version())
+    } else {
+        format!("citadel-extra-{:03}.img", metainfo.version())
+    };
+
+    if !metainfo.channel().chars().all(|c| c.is_ascii_lowercase()) {
+        bail!("Refusing to build path from strange channel name {}", metainfo.channel());
+    }
+    let image_dir = Path::new("/storage/resources").join(metainfo.channel());
+    let image_dest = image_dir.join(filename);
+    if image_dest.exists() {
+       rotate(&image_dest)?;
+    }
+    fs::rename(source,image_dest)?;
+    Ok(())
+}
+
+fn rotate(path: &Path) -> Result<()> {
+    if !path.exists() || path.file_name().is_none() {
+        return Ok(());
+    }
+    let filename = path.file_name().unwrap();
+    let dot_zero = path.with_file_name(format!("{}.0", filename.to_string_lossy()));
+    if dot_zero.exists() {
+        fs::remove_file(&dot_zero)?;
+    }
+    fs::rename(path, &dot_zero)?;
+    Ok(())
+}
+
 fn genkeys() -> Result<()> {
     let keypair = KeyPair::generate()?;
     println!("public-key = \"{}\"", keypair.public_key().to_hex());
@@ -208,6 +271,17 @@ fn decompress(arg_matches: &ArgMatches) -> Result<()> {
     } else {
         img.decompress()?;
     }
+    Ok(())
+}
+
+fn bless() -> Result<()> {
+    for mut p in Partition::rootfs_partitions()? {
+        if p.is_initialized() && p.is_mounted() {
+            p.bless()?;
+            return Ok(());
+        }
+    }
+    warn!("No mounted partition found to bless");
     Ok(())
 }
 
