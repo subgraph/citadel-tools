@@ -94,6 +94,8 @@ impl ResourceImage {
     }
 
     fn new(path: &Path, header: ImageHeader, metainfo: MetaInfo) -> ResourceImage {
+        assert_eq!(path.extension(), Some(OsStr::new("img")), "image filename must have .img extension");
+
         ResourceImage {
             path: path.to_owned(),
             header, metainfo,
@@ -122,36 +124,21 @@ impl ResourceImage {
         if !self.is_compressed() {
             return Ok(())
         }
-
-        let tmpfile = self.extract_body_to_tmpfile()?;
-        let decompressed = self.decompress_tmpfile(tmpfile)?;
-        self.header.clear_flag(ImageHeader::FLAG_DATA_COMPRESSED);
-        self.write_image_from_tmpfile(&decompressed)?;
-        Ok(())
-    }
-
-    fn decompress_tmpfile(&self, tmpfile: PathBuf) -> Result<PathBuf> {
-        info!("Decompressing image contents");
-        if !self.is_compressed() {
-            return Ok(tmpfile);
-        }
-        util::xz_decompress(&tmpfile)?;
-        let mut new_tmpfile = PathBuf::from(tmpfile);
-        new_tmpfile.set_extension("");
-        Ok(new_tmpfile)
-    }
-
-    fn extract_body_to_tmpfile(&self) -> Result<PathBuf> {
-        let mut reader = File::open(&self.path)?;
+        info!("decompressing image file {}", self.path().display());
+        let mut reader = File::open(self.path())?;
         reader.seek(SeekFrom::Start(4096))?;
-        fs::create_dir_all("/tmp/citadel-image-tmp")?;
-        let mut path = Path::new("/tmp/citadel-image-tmp").join(format!("{}-tmp", &self.metainfo.image_type()));
-        if self.is_compressed() {
-            path.set_extension("xz");
-        }
-        let mut out = File::create(&path)?;
+
+        let xzfile = self.path.with_extension("tmp.xz");
+        let mut out = File::create(&xzfile)?;
         io::copy(&mut reader, &mut out)?;
-        Ok(path)
+
+        util::xz_decompress(xzfile)?;
+        fs::rename(self.path.with_extension("tmp"), self.path())?;
+
+        self.header.clear_flag(ImageHeader::FLAG_DATA_COMPRESSED);
+        self.header.write_header_to(self.path())?;
+
+        Ok(())
     }
 
     pub fn write_to_partition(&self, partition: &Partition) -> Result<()> {
@@ -171,15 +158,6 @@ impl ResourceImage {
         self.header.set_status(ImageHeader::STATUS_NEW);
         self.header.write_partition(partition.path())?;
 
-        Ok(())
-    }
-
-    fn write_image_from_tmpfile(&self, tmpfile: &Path) -> Result<()> {
-        let mut reader = File::open(&tmpfile)?;
-        let mut out = File::create(self.path())?;
-        self.header.write_header(&mut out)?;
-        io::copy(&mut reader, &mut out)?;
-        fs::remove_file(tmpfile)?;
         Ok(())
     }
 
@@ -209,23 +187,20 @@ impl ResourceImage {
         if !self.has_verity_hashtree() {
             self.generate_verity_hashtree()?;
         }
-        verity::setup_image_device(self.path())
+        verity::setup_image_device(self.path(), self.metainfo())
     }
 
     pub fn generate_verity_hashtree(&self) -> Result<()> {
         if self.has_verity_hashtree() {
             return Ok(())
         }
-        info!("Generating dm-verity hash tree for image {}", self.path.display());
-        let mut tmp = self.extract_body_to_tmpfile()?;
         if self.is_compressed() {
-            tmp = self.decompress_tmpfile(tmp)?;
-            self.header.clear_flag(ImageHeader::FLAG_DATA_COMPRESSED);
+            self.decompress()?;
         }
-
-        verity::generate_image_hashtree(&tmp, self.metainfo())?;
+        info!("Generating dm-verity hash tree for image {}", self.path.display());
+        verity::generate_image_hashtree(self.path(), self.metainfo())?;
         self.header.set_flag(ImageHeader::FLAG_HASH_TREE);
-        self.write_image_from_tmpfile(&tmp)?;
+        self.header.write_header_to(self.path())?;
         Ok(())
     }
 
@@ -234,27 +209,20 @@ impl ResourceImage {
             self.generate_verity_hashtree()?;
         }
         info!("Verifying dm-verity hash tree");
-        let tmp = self.extract_body_to_tmpfile()?;
-        let ok = verity::verify_image(&tmp, &self.metainfo)?;
-        fs::remove_file(tmp)?;
-        Ok(ok)
+        verity::verify_image(self.path(), self.metainfo())
     }
 
     pub fn generate_shasum(&self) -> Result<String> {
-        let mut tmp = self.extract_body_to_tmpfile()?;
         if self.is_compressed() {
-            tmp = self.decompress_tmpfile(tmp)?;
+            self.decompress()?;
         }
         info!("Calculating sha256 of image");
-        if self.has_verity_hashtree() {
-            let args = format!("if={} of={}.shainput bs=4096 count={}", tmp.display(), tmp.display(), self.metainfo.nblocks());
-            util::exec_cmdline_quiet("/bin/dd", args)?;
-            fs::remove_file(&tmp)?;
-            tmp.set_extension("shainput");
-        }
-        let shasum = util::sha256(&tmp)?;
-        fs::remove_file(tmp)?;
+        let output = util::exec_cmdline_pipe_input("sha256sum", "-", self.path(), util::FileRange::Range{offset: 4096, len: self.metainfo.nblocks() * 4096})
+            .context(format!("failed to calculate sha256 on {}", self.path().display()))?;
+        let v: Vec<&str> = output.split_whitespace().collect();
+        let shasum = v[0].trim().to_owned();
         Ok(shasum)
+
     }
 
     // Mount the resource image but use a simple loop mount rather than setting up a dm-verity
@@ -278,14 +246,18 @@ impl ResourceImage {
     }
 
     pub fn create_loopdev(&self) -> Result<PathBuf> {
-        let args = format!("--offset 4096 -f --show {}", self.path.display());
+        let args = format!("--offset 4096 -f --read-only --show {}", self.path.display());
         let output = util::exec_cmdline_with_output("/sbin/losetup", args)?;
         Ok(PathBuf::from(output))
     }
 
     // Return the path at which to mount this resource image.
     fn mount_path(&self) -> PathBuf {
-        PathBuf::from(format!("{}/{}.mountpoint", RUN_DIRECTORY, self.metainfo.image_type()))
+        if self.metainfo.image_type() == "realmfs" {
+            PathBuf::from(format!("{}/{}-realmfs.mountpoint", RUN_DIRECTORY, self.metainfo.realmfs_name().expect("realmfs image has no name")))
+        } else {
+            PathBuf::from(format!("{}/{}.mountpoint", RUN_DIRECTORY, self.metainfo.image_type()))
+        }
     }
 
     // Read and process a manifest file in the root directory of a mounted resource image.
@@ -333,7 +305,7 @@ impl ResourceImage {
     // If the /storage directory is not mounted, attempt to mount it.
     // Return true if already mounted or if the attempt to mount it succeeds.
     fn ensure_storage_mounted() -> Result<bool> {
-        if Mount::is_path_mounted("/dev/mapper/citadel-storage")? {
+        if Mount::is_source_mounted("/dev/mapper/citadel-storage")? {
             return Ok(true);
         }
         let path = Path::new("/dev/mapper/citadel-storage");
