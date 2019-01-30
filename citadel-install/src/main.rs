@@ -8,11 +8,13 @@ mod disks;
 use std::result;
 use std::path::Path;
 use std::env;
-use std::thread;
 use std::time;
 use std::fs;
+use std::ffi::OsStr;
+use std::thread::{self,JoinHandle};
 use std::process::exit;
 use failure::Error;
+use libcitadel::ResourceImage;
 
 pub type Result<T> = result::Result<T,Error>;
 
@@ -48,14 +50,15 @@ fn live_setup() -> Result<()> {
     if !Path::new("/etc/initrd-release").exists() {
         bail!("Not running in initramfs, cannot do live-setup");
     }
-    let installer = installer::Installer::new();
-    installer.live_setup()
+    let installer = installer::Installer::new_livesetup();
+    installer.run()
 }
 
 fn copy_artifacts() -> Result<()> {
 
     for _ in 0..3 {
         if try_copy_artifacts()? {
+            decompress_images()?;
             return Ok(())
         }
         // Try again after waiting for more devices to be discovered
@@ -129,6 +132,30 @@ fn deploy_syslinux_artifacts() -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn decompress_images() -> Result<()> {
+    println!("decompressing images");
+    let mut threads = Vec::new();
+    for entry in fs::read_dir("/run/images")? {
+        let entry = entry?;
+        if entry.path().extension() == Some(OsStr::new("img")) {
+            if let Ok(image) = ResourceImage::from_path(&entry.path()) {
+                threads.push(decompress_one_image(image));
+            }
+        }
+    }
+    for t in threads {
+        t.join().unwrap()?;
+    }
+    Ok(())
+
+}
+
+fn decompress_one_image(image: ResourceImage) -> JoinHandle<Result<()>> {
+    thread::spawn(move ||{
+        image.decompress()
+    })
 }
 
 fn cli_install() -> Result<()> {
