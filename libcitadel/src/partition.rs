@@ -166,10 +166,17 @@ impl Partition {
         }
         Ok(())
     }
+
+    pub fn bless(&mut self) -> Result<()> {
+        if self.header().status() == ImageHeader::STATUS_TRY_BOOT {
+            self.write_status(ImageHeader::STATUS_GOOD)?;
+        }
+        Ok(())
+    }
 }
 
 fn is_in_use(path: &Path) -> Result<bool> {
-    if Mount::is_path_mounted(path)? {
+    if Mount::is_source_mounted(path)? {
         return Ok(true);
     }
     let holders = count_block_holders(path)?;
