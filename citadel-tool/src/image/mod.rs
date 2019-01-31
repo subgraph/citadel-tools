@@ -1,41 +1,29 @@
-#[macro_use] extern crate libcitadel;
-#[macro_use] extern crate failure;
-#[macro_use] extern crate serde_derive;
-
-use std::process::exit;
 use std::path::Path;
-use std::fs;
+use std::process::exit;
 
 use clap::{App,Arg,SubCommand,ArgMatches};
 use clap::AppSettings::*;
-
-use crate::build::UpdateBuilder;
-use crate::config::BuildConfig;
 use libcitadel::{Result,ResourceImage,set_verbose,format_error,Partition,KeyPair,ImageHeader};
+use std::fs;
 
-mod build;
-mod config;
+pub fn main(args: Vec<String>) {
 
-fn main() {
     let app = App::new("citadel-image")
         .about("Citadel update image builder")
         .settings(&[ArgRequiredElseHelp,ColoredHelp, DisableHelpSubcommand, DisableVersion, DeriveDisplayOrder])
 
-        .subcommand(SubCommand::with_name("build")
-            .about("Build an update image specified by a configuration file")
-            .arg(Arg::with_name("build-file")
-                .required(true)
-                .help("Path to image build config file")))
         .subcommand(SubCommand::with_name("metainfo")
             .about("Display metainfo variables for an image file")
             .arg(Arg::with_name("path")
                 .required(true)
                 .help("Path to image file")))
+
         .subcommand(SubCommand::with_name("generate-verity")
             .about("Generate dm-verity hash tree for an image file")
             .arg(Arg::with_name("path")
                 .required(true)
                 .help("Path to image file")))
+
         .subcommand(SubCommand::with_name("verify")
             .about("Verify dm-verity hash tree for an image file")
             .arg(Arg::with_name("path")
@@ -72,14 +60,13 @@ fn main() {
         .subcommand(SubCommand::with_name("verify-shasum")
             .about("Verify the sha256 sum of the image")
             .arg(Arg::with_name("path")
-            .required(true)
-            .help("Path to image file")));
+                .required(true)
+                .help("Path to image file")));
 
     set_verbose(true);
-    let matches = app.get_matches();
 
+    let matches = app.get_matches_from(args);
     let result = match matches.subcommand() {
-        ("build", Some(m)) => build_image(m),
         ("metainfo", Some(m)) => metainfo(m),
         ("generate-verity", Some(m)) => generate_verity(m),
         ("verify", Some(m)) => verify(m),
@@ -97,14 +84,6 @@ fn main() {
         println!("Error: {}", format_error(e));
         exit(1);
     }
-}
-
-fn build_image(arg_matches: &ArgMatches) -> Result<()> {
-    let build_file = arg_matches.value_of("build-file").unwrap();
-    let config = BuildConfig::load(build_file)?;
-    let mut builder = UpdateBuilder::new(config);
-    builder.build()?;
-    Ok(())
 }
 
 fn metainfo(arg_matches: &ArgMatches) -> Result<()> {
@@ -238,7 +217,7 @@ fn install_image(arg_matches: &ArgMatches) -> Result<()> {
     let image_dir = Path::new("/storage/resources").join(metainfo.channel());
     let image_dest = image_dir.join(filename);
     if image_dest.exists() {
-       rotate(&image_dest)?;
+        rotate(&image_dest)?;
     }
     fs::rename(source,image_dest)?;
     Ok(())
@@ -299,9 +278,9 @@ fn choose_install_partition(verbose: bool) -> Result<Partition> {
     if verbose {
         for p in &partitions {
             info!("Partition: {}  (Mounted: {}) (Empty: {})",
-                     p.path().display(),
-                     bool_to_yesno(p.is_mounted()),
-                     bool_to_yesno(!p.is_initialized()));
+                  p.path().display(),
+                  bool_to_yesno(p.is_mounted()),
+                  bool_to_yesno(!p.is_initialized()));
         }
     }
 

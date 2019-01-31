@@ -8,7 +8,7 @@ use crate::{CommandLine,OsRelease,ImageHeader,MetaInfo,Result,Partition,Mount,ve
 use failure::ResultExt;
 
 const STORAGE_BASEDIR: &str = "/sysroot/storage/resources";
-const RUN_DIRECTORY: &str = "/run/images";
+const RUN_DIRECTORY: &str = "/run/citadel/images";
 
 /// Locates and mounts a resource image file.
 ///
@@ -24,7 +24,7 @@ const RUN_DIRECTORY: &str = "/run/images";
 ///     citadel.noverity:     Mount image without dm-verity. Also do not verify header signature.
 ///     citadel.nosignatures: Do not verify header signature.
 ///
-/// A requested image file will be searched for first in /run/images and if not found there the
+/// A requested image file will be searched for first in /run/citadel/images and if not found there the
 /// usual location of /storage/resources is searched.
 ///
 pub struct ResourceImage {
@@ -35,7 +35,7 @@ pub struct ResourceImage {
 
 impl ResourceImage {
     /// Locate and return a resource image of type `image_type`.
-    /// First the /run/images directory is searched, and if not found there,
+    /// First the /run/citadel/images directory is searched, and if not found there,
     /// the image will be searched for in /storage/resources/$channel
     pub fn find(image_type: &str) -> Result<ResourceImage> {
         let channel = ResourceImage::rootfs_channel();
@@ -59,7 +59,12 @@ impl ResourceImage {
         Err(format_err!("Failed to find resource image of type: {}", image_type))
     }
 
-    /// Locate a rootfs image in /run/images and return it
+    pub fn mount_image_type(image_type: &str) -> Result<()> {
+        let mut image = ResourceImage::find(image_type)?;
+        image.mount()
+    }
+
+    /// Locate a rootfs image in /run/citadel/images and return it
     pub fn find_rootfs() -> Result<ResourceImage> {
         match search_directory(RUN_DIRECTORY, "rootfs", None)? {
             Some(image) => Ok(image),

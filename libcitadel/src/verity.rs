@@ -109,7 +109,7 @@ fn setup_device(srcdev: &str, devname: &str, nblocks: usize, roothash: &str) -> 
 }
 
 fn create_image_loop_device(file: &Path) -> Result<String> {
-    let args = format!("--offset 4096 -f --show {}", file.display());
+    let args = format!("--offset 4096 --read-only -f --show {}", file.display());
     let output = util::exec_cmdline_with_output(LOSETUP, args)?;
     Ok(output)
 }

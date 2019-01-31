@@ -6,7 +6,7 @@ use std::io::Write;
 use crate::{ImageHeader,MetaInfo,Mount,Result,util,verity};
 
 const BASE_PATH: &'static str = "/storage/realms/realmfs-images";
-const RUN_DIRECTORY: &str = "/run/images";
+const RUN_DIRECTORY: &str = "/run/citadel/images";
 const MAX_REALMFS_NAME_LEN: usize = 40;
 
 

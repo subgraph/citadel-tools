@@ -1,20 +1,11 @@
 use std::process::Command;
 
-use libcitadel::{BlockDev,CommandLine,ImageHeader,Partition,Result,verity};
+use libcitadel::{BlockDev,ResourceImage,CommandLine,ImageHeader,Partition,Result,verity};
 use std::path::Path;
 use std::process::Stdio;
-use ResourceImage;
 
 pub fn setup_rootfs() -> Result<()> {
-    if CommandLine::install_mode() || CommandLine::live_mode() {
-        setup_rootfs_resource()
-    } else {
-        let p = choose_boot_partiton(true)?;
-        setup_partition(p)
-    }
-}
-
-fn setup_partition(mut p: Partition) -> Result<()> {
+    let mut p = choose_boot_partiton(true)?;
     if CommandLine::noverity() {
         setup_partition_unverified(&p)
     } else {
@@ -22,15 +13,11 @@ fn setup_partition(mut p: Partition) -> Result<()> {
     }
 }
 
-fn setup_rootfs_resource() -> Result<()> {
-    info!("Searching for rootfs resource image");
-
-    let img = ResourceImage::find_rootfs()?;
-
+pub fn setup_rootfs_resource(rootfs: &ResourceImage) -> Result<()> {
     if CommandLine::noverity() {
-        setup_resource_unverified(&img)
+        setup_resource_unverified(&rootfs)
     } else {
-        setup_resource_verified(&img)
+        setup_resource_verified(&rootfs)
     }
 }
 

@@ -1,9 +1,9 @@
 use std::io::{self,Write};
 use std::path::Path;
-use crate::Result;
-use crate::util::Disk;
+use libcitadel::Result;
+use super::disk::Disk;
 use rpassword;
-use crate::installer::Installer;
+use crate::install::installer::Installer;
 
 pub fn run_cli_install() -> Result<bool> {
     let disk = match choose_disk()? {

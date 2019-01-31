@@ -6,7 +6,7 @@ use std::io::{self,Write};
 use failure::ResultExt;
 use libcitadel::{Result,ImageHeader,verity,util,devkeys};
 
-use crate::BuildConfig;
+use super::config::BuildConfig;
 use std::path::Path;
 
 pub struct UpdateBuilder {

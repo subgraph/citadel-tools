@@ -1,8 +1,8 @@
 use std::path::{Path, PathBuf};
 use std::fs;
 
-use crate::Result;
-use crate::util;
+use libcitadel::Result;
+use libcitadel::util;
 
 ///
 /// Represents a disk partition device on the system

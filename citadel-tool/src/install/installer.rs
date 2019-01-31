@@ -6,11 +6,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
-use libcitadel::util::{mount,exec_cmdline_with_output};
+use libcitadel::util::{self,mount,exec_cmdline_with_output};
 use libcitadel::RealmFS;
-
-use super::util;
-use super::Result;
+use libcitadel::Result;
+use libcitadel::OsRelease;
 
 const BLKDEACTIVATE: &str = "/sbin/blkdeactivate";
 const CRYPTSETUP: &str = "/sbin/cryptsetup";
@@ -40,7 +39,7 @@ const EXTRA_IMAGE_NAME: &str = "citadel-extra.img";
 const INSTALL_MOUNT: &str = "/run/installer/mnt";
 const LUKS_PASSPHRASE_FILE: &str = "/run/installer/luks-passphrase";
 
-const DEFAULT_ARTIFACT_DIRECTORY: &str = "/run/images";
+const DEFAULT_ARTIFACT_DIRECTORY: &str = "/run/citadel/images";
 
 const KERNEL_CMDLINE: &str = "add_efi_memmap intel_iommu=off cryptomgr.notests rcupdate.rcu_expedited=1 rcu_nocbs=0-64 tsc=reliable no_timer_check noreplace-smp i915.fastboot=1 quiet splash";
 
@@ -183,15 +182,15 @@ impl Installer {
     }
 
     fn setup_live_realm(&self) -> Result<()> {
-        self.cmd(CITADEL_IMAGE, format!("decompress /run/images/base-realmfs.img"))?;
+        self.cmd(CITADEL_IMAGE, format!("decompress /run/citadel/images/base-realmfs.img"))?;
         let realmfs_dir = self.storage().join("realms/realmfs-images");
         let base_realmfs = realmfs_dir.join("base-realmfs.img");
 
         self.info(format!("creating directory {}", realmfs_dir.display()))?;
         fs::create_dir_all(&realmfs_dir)?;
 
-        self.info(format!("creating symlink {} -> {}", base_realmfs.display(), "/run/images/base-realmfs.img"))?;
-        unixfs::symlink("/run/images/base-realmfs.img", &base_realmfs)?;
+        self.info(format!("creating symlink {} -> {}", base_realmfs.display(), "/run/citadel/images/base-realmfs.img"))?;
+        unixfs::symlink("/run/citadel/images/base-realmfs.img", &base_realmfs)?;
         self.mount_realmfs()?;
 
         self.setup_storage()?;
@@ -201,7 +200,7 @@ impl Installer {
         fs::write(self.storage().join("realms/realm-main/config"), "realmfs = \"base\"")?;
         let rootfs = self.storage().join("realms/realm-main/rootfs");
         fs::remove_file(&rootfs)?;
-        unixfs::symlink("/run/images/base-realmfs.mountpoint", &rootfs)?;
+        unixfs::symlink("/run/citadel/images/base-realmfs.mountpoint", &rootfs)?;
 
         self.info("Creating /Shared realms directory")?;
         fs::create_dir_all(self.storage().join("realms/Shared"))?;
@@ -211,12 +210,12 @@ impl Installer {
     }
 
     pub fn mount_realmfs(&self) -> Result<()> {
-        self.info("Creating loop device for /run/images/base-realmfs.img")?;
-        let args = format!("--offset 4096 -f --show /run/images/base-realmfs.img");
+        self.info("Creating loop device for /run/citadel/images/base-realmfs.img")?;
+        let args = format!("--offset 4096 -f --show /run/citadel/images/base-realmfs.img");
         let loopdev = exec_cmdline_with_output("/sbin/losetup", args)?;
-        self.info("Mounting image at /run/images/base-realmfs.mountpoint")?;
-        fs::create_dir_all("/run/images/base-realmfs.mountpoint")?;
-        mount(&loopdev, "/run/images/base-realmfs.mountpoint", Some("-oro"))?;
+        self.info("Mounting image at /run/citadel/images/base-realmfs.mountpoint")?;
+        fs::create_dir_all("/run/citadel/images/base-realmfs.mountpoint")?;
+        mount(&loopdev, "/run/citadel/images/base-realmfs.mountpoint", Some("-oro"))?;
         Ok(())
     }
 
@@ -419,7 +418,7 @@ impl Installer {
         /*
         self.info("Creating rootfs symlink")?;
         unixfs::symlink(
-            format!("/run/images/{}-realmfs.mountpoint", self.main_realmfs()),
+            format!("/run/citadel/images/{}-realmfs.mountpoint", self.main_realmfs()),
             format!("{}/rootfs", realm.display()))?;
         */
 
@@ -430,7 +429,10 @@ impl Installer {
     }
 
     fn setup_storage_resources(&self) -> Result<()> {
-        let channel = util::rootfs_channel();
+        let channel = match OsRelease::citadel_channel() {
+            Some(channel) => channel,
+            None => "dev",
+        };
         let resources = self.storage().join("resources").join(channel);
         fs::create_dir_all(&resources)?;
 

@@ -1,58 +1,8 @@
-use std::mem;
-use std::ffi::CStr;
-use std::str::from_utf8_unchecked;
 use std::path::{Path,PathBuf};
-use std::process::{Command,ExitStatus,Stdio};
 use std::fs;
 
-use libc::{self, c_char};
-use failure::ResultExt;
-use libcitadel::OsRelease;
+use libcitadel::Result;
 
-use super::Result;
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct UtsName(libc::utsname);
-
-#[allow(dead_code)]
-impl UtsName {
-    pub fn sysname(&self) -> &str {
-        to_str(&(&self.0.sysname as *const c_char ) as *const *const c_char)
-    }
-
-    pub fn nodename(&self) -> &str {
-        to_str(&(&self.0.nodename as *const c_char ) as *const *const c_char)
-    }
-
-    pub fn release(&self) -> &str {
-        to_str(&(&self.0.release as *const c_char ) as *const *const c_char)
-    }
-
-    pub fn version(&self) -> &str {
-        to_str(&(&self.0.version as *const c_char ) as *const *const c_char)
-    }
-
-    pub fn machine(&self) -> &str {
-        to_str(&(&self.0.machine as *const c_char ) as *const *const c_char)
-    }
-}
-
-pub fn uname() -> UtsName {
-    unsafe {
-        let mut ret: UtsName = mem::uninitialized();
-        libc::uname(&mut ret.0);
-        ret
-    }
-}
-
-#[inline]
-fn to_str<'a>(s: *const *const c_char) -> &'a str {
-    unsafe {
-        let res = CStr::from_ptr(*s).to_bytes();
-        from_utf8_unchecked(res)
-    }
-}
 
 #[derive(Debug, Clone)]
 pub struct Disk {
@@ -110,6 +60,7 @@ impl Disk {
 
 }
 
+/*
 pub fn rootfs_channel() -> &'static str {
     match OsRelease::citadel_channel() {
         Some(channel) => channel,
@@ -154,3 +105,4 @@ fn check_cmd_status(cmd_path: &str, status: &ExitStatus) -> Result<()> {
     }
     Ok(())
 }
+*/
