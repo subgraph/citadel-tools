@@ -35,8 +35,6 @@ mod systemd;
 mod config;
 mod network;
 
-use libcitadel::RealmFS;
-
 use crate::realm::{Realm,RealmSymlinks};
 use crate::manager::RealmManager;
 use crate::config::RealmConfig;

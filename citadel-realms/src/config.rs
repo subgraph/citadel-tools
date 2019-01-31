@@ -6,13 +6,8 @@ lazy_static! {
     pub static ref GLOBAL_CONFIG: RealmConfig = RealmConfig::load_global_config();
 }
 
-fn default_zone() -> String {
-    "clear".to_owned()
-}
-
-fn default_realmfs() -> String {
-    "base".to_owned()
-}
+const DEFAULT_ZONE: &str = "clear";
+const DEFAULT_REALMFS: &str = "base";
 
 #[derive (Deserialize,Clone)]
 pub struct RealmConfig {
@@ -90,8 +85,8 @@ impl RealmConfig {
             use_kvm: Some(false),
             use_gpu: Some(false),
             use_network: Some(true),
-            network_zone: Some(default_zone()),
-            realmfs: Some(default_realmfs()),
+            network_zone: Some(DEFAULT_ZONE.into()),
+            realmfs: Some(DEFAULT_REALMFS.into()),
             realmfs_write: Some(false),
             parent: None,
         }
@@ -153,7 +148,6 @@ impl RealmConfig {
             }
         }
         ""
-
     }
 
     fn bool_value<F>(&self, get: F) -> bool
@@ -167,6 +161,5 @@ impl RealmConfig {
             return get(parent).unwrap_or(false);
         }
         false
-
     }
 }
