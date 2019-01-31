@@ -1,10 +1,11 @@
-use std::path::PathBuf;
+use std::path::{Path,PathBuf};
 use std::net::Ipv4Addr;
 use std::collections::{HashSet,HashMap};
 use std::io::{BufReader,BufRead,Write};
 use std::fs::{self,File};
 
 use crate::Result;
+use crate::realm::REALMS_RUN_PATH;
 
 const MIN_MASK: usize = 16;
 const MAX_MASK: usize = 24;
@@ -58,7 +59,7 @@ impl NetworkConfig {
 ///
 /// Allocates IP addresses for a bridge shared by multiple realms.
 ///
-/// State information is stored in /run/realms/network-$bridge as
+/// State information is stored in /run/citadel/realms/network-$bridge as
 /// colon ':' separated pairs of realm name and allocated ip address
 ///
 ///    realm-a:172.17.0.2
@@ -160,7 +161,7 @@ impl BridgeAllocator {
     }
 
     fn state_file_path(&self) -> PathBuf {
-        PathBuf::from(format!("/run/realms/network-{}", self.bridge))
+        Path::new(REALMS_RUN_PATH).with_file_name(format!("network-{}", self.bridge))
     }
 
 

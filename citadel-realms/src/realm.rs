@@ -11,7 +11,7 @@ use crate::{RealmConfig,Result,Systemd,NetworkConfig,GLOBAL_CONFIG};
 use crate::util::*;
 
 const REALMS_BASE_PATH: &str = "/realms";
-const REALMS_RUN_PATH: &str = "/run/realms";
+pub const REALMS_RUN_PATH: &str = "/run/citadel/realms";
 
 #[derive(Clone)]
 pub struct Realm {
@@ -362,7 +362,7 @@ impl RealmSymlinks {
 
         let path = runpath.join("current.realm");
         if let Some(n) = name {
-            let tmp = Path::new("/run/current.realm.tmp");
+            let tmp = Path::new("/run/citadel/current.realm.tmp");
             let target = PathBuf::from(REALMS_BASE_PATH).join(format!("realm-{}", n));
             symlink(&target, tmp)
                 .map_err(|e| format_err!("failed to create symlink from {} to {}: {}", tmp.display(), target.display(), e))?;
