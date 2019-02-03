@@ -1,93 +1,74 @@
 use crate::Result;
-use ring::rand;
-use ring::signature::{self,Ed25519KeyPair,ED25519_PUBLIC_KEY_LEN,ED25519_PKCS8_V2_LEN};
-use untrusted::Input;
-use rustc_serialize::hex::{FromHex,ToHex};
 
+use sodiumoxide::randombytes::randombytes_into;
+use sodiumoxide::crypto::sign::{self,Seed,SEEDBYTES,PUBLICKEYBYTES};
+use hex;
 
 ///
 /// Keys for signing or verifying signatures.  Small convenience
-/// wrapper around `ring/ed25519`.
+/// wrapper around `sodiumoxide::crypto::sign`.
 ///
 ///
 
 #[derive(Clone)]
-pub struct PublicKey([u8; ED25519_PUBLIC_KEY_LEN]);
-pub struct KeyPair([u8; ED25519_PKCS8_V2_LEN]);
-pub struct Signature(signature::Signature);
+pub struct PublicKey(sign::PublicKey);
+pub struct KeyPair(Seed);
+pub struct Signature(sign::Signature);
 
 impl PublicKey {
 
     pub fn from_hex(hex: &str) -> Result<PublicKey> {
-        let bytes = hex.from_hex()?;
-        if bytes.len() != ED25519_PUBLIC_KEY_LEN {
+        let bytes = hex::decode(hex)?;
+
+        if bytes.len() != PUBLICKEYBYTES {
             bail!("Hex encoded public key has invalid length: {}", bytes.len());
         }
-        Ok(PublicKey::from_bytes(&bytes))
+        let pubkey = sign::PublicKey::from_slice(&bytes)
+            .expect("PublicKey::from_slice() failed");
+        Ok(PublicKey(pubkey))
     }
 
     pub fn to_hex(&self) -> String {
-        self.0.to_hex()
-    }
-
-    fn from_bytes(bytes: &[u8]) -> PublicKey {
-        let mut key = [0u8; ED25519_PUBLIC_KEY_LEN];
-        key.copy_from_slice(bytes);
-        PublicKey(key)
+        hex::encode(&(self.0).0)
     }
 
     pub fn verify(&self, data: &[u8], signature: &[u8]) -> bool {
-        let signature = Input::from(signature);
-        let data = Input::from(data);
-        let pubkey = Input::from(&self.0);
-
-        match signature::verify(&signature::ED25519, pubkey, data, signature) {
-            Ok(()) => true,
-            Err(_) => false,
-        }
+        let sig = sign::Signature::from_slice(signature)
+            .expect("Signature::from_slice() failed");
+        sign::verify_detached(&sig, data, &self.0)
     }
 }
 
 impl KeyPair {
-    /// Generate a new pair of signing/verifying keys using
-    /// the system random number generator.  The resulting
-    /// `Ed25519KeyPair` can be extracted in an ascii
-    /// hex encoded pkcs#8 format for storage in configuration files
-    /// with the `to_hex()` method.
-    pub fn generate() -> Result<KeyPair> {
-        let rng = rand::SystemRandom::new();
-        let bytes = Ed25519KeyPair::generate_pkcs8(&rng)?;
-        KeyPair::from_bytes(&bytes)
+    /// Create a new pair of signing/verifying keys by generating a random seed
+    /// The secret and public keys can be derived from the seed.
+    pub fn generate() -> KeyPair {
+        let mut seedbuf = [0; SEEDBYTES];
+        randombytes_into(&mut seedbuf);
+        KeyPair(sign::Seed(seedbuf))
     }
 
     pub fn from_hex(hex: &str) -> Result<KeyPair> {
-        KeyPair::from_bytes(&hex.from_hex()?)
-    }
-
-    fn from_bytes(bytes: &[u8]) -> Result<KeyPair> {
-        let mut pair = [0u8; ED25519_PKCS8_V2_LEN];
-        pair.copy_from_slice(bytes);
-        let _ = Ed25519KeyPair::from_pkcs8(Input::from(&pair))?;
-        Ok(KeyPair(pair))
-    }
-
-    fn get_keys(&self) -> Ed25519KeyPair {
-        Ed25519KeyPair::from_pkcs8(Input::from(&self.0))
-            .expect("failed to parse pkcs8 key")
+        let bytes = hex::decode(hex)?;
+        if bytes.len() != SEEDBYTES {
+           bail!("Hex encoded keypair has incorrect length");
+        }
+        let seed = sign::Seed::from_slice(&bytes).expect("Seed::from_slice() failed");
+        Ok(KeyPair(seed))
     }
 
     pub fn public_key(&self) -> PublicKey {
-        let keys = self.get_keys();
-        PublicKey::from_bytes(keys.public_key_bytes())
+        let (pk,_) = sign::keypair_from_seed(&self.0);
+        PublicKey(pk)
     }
 
-    pub fn private_key_hex(&self) -> String {
-        self.0.to_hex()
+    pub fn to_hex(&self) -> String {
+        hex::encode(&(self.0).0)
     }
 
     pub fn sign(&self, data: &[u8]) -> Signature {
-        let keys = self.get_keys();
-        let signature = keys.sign(data);
+        let (_,sk) = sign::keypair_from_seed(&self.0);
+        let signature = sign::sign_detached(data, &sk);
         Signature(signature)
     }
 
@@ -98,7 +79,7 @@ impl KeyPair {
 
 impl Signature {
     pub fn to_bytes(&self) -> &[u8] {
-        self.0.as_ref()
+        &(self.0).0
     }
 }
 

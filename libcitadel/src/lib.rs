@@ -70,8 +70,7 @@ pub use crate::keys::{KeyPair,PublicKey};
 pub use crate::mount::Mount;
 pub use crate::realmfs::RealmFS;
 
-const DEVKEYS_HEX: &str =
-    "3053020101300506032b6570042204206ed2849c6c5168e1aebc50005ac3d4a4e84af4889e4e0189bb4c787e6ee0be49a1230321006b652764c62a1de35e7e37af2b743e9a5b82cee2211cf3091d2514441b417f5f";
+const DEVKEYS_HEX: &str = "bc02a3a4fd4a0471a8cb2f96d8be0a0a2d060798c024e60d7a98482f23197fc0";
 
 pub fn devkeys() -> KeyPair {
     KeyPair::from_hex(&DEVKEYS_HEX)
