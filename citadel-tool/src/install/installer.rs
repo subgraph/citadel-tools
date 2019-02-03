@@ -10,6 +10,7 @@ use libcitadel::util::{self,mount,exec_cmdline_with_output};
 use libcitadel::RealmFS;
 use libcitadel::Result;
 use libcitadel::OsRelease;
+use libcitadel::KeyRing;
 
 const BLKDEACTIVATE: &str = "/sbin/blkdeactivate";
 const CRYPTSETUP: &str = "/sbin/cryptsetup";
@@ -370,6 +371,7 @@ impl Installer {
 
     fn setup_storage(&self) -> Result<()> {
         if self._type == InstallType::Install {
+            self.create_keyring()?;
             self.setup_storage_resources()?;
             self.setup_base_realmfs()?;
         }
@@ -381,6 +383,12 @@ impl Installer {
         self.cmd(CHOWN, format!("1000:1000 {}/realms/Shared", self.storage().display()))?;
 
         Ok(())
+    }
+
+    fn create_keyring(&self) -> Result<()> {
+        self.header("Creating initial keyring")?;
+        let keyring = KeyRing::create_new();
+        keyring.write(self.storage().join("keyring"), self.passphrase.as_ref().unwrap())
     }
 
     fn setup_base_realmfs(&self) -> Result<()> {

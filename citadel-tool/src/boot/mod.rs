@@ -1,7 +1,7 @@
 use std::fs;
 use std::process::exit;
 
-use libcitadel::{util,Result,ResourceImage,CommandLine,set_verbose,format_error};
+use libcitadel::{util,Result,ResourceImage,CommandLine,set_verbose,format_error,KeyRing};
 
 mod live;
 mod disks;
@@ -30,8 +30,19 @@ fn do_rootfs() -> Result<()> {
     if CommandLine::live_mode() || CommandLine::install_mode() {
         live::live_rootfs()
     } else {
-        rootfs::setup_rootfs()
+        rootfs::setup_rootfs()?;
+        if let Err(err) = setup_keyring() {
+            warn!("Failed to setup keyring: {}", err);
+        }
+        Ok(())
     }
+}
+
+fn setup_keyring() -> Result<()> {
+    ResourceImage::ensure_storage_mounted()?;
+    let keyring = KeyRing::load_with_cryptsetup_passphrase("/sysroot/storage/keyring")?;
+    keyring.add_keys_to_kernel()?;
+    Ok(())
 }
 
 

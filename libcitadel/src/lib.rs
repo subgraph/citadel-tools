@@ -59,6 +59,7 @@ pub mod util;
 pub mod verity;
 mod mount;
 mod realmfs;
+mod keyring;
 
 pub use crate::config::OsRelease;
 pub use crate::blockdev::BlockDev;
@@ -69,6 +70,7 @@ pub use crate::resource::ResourceImage;
 pub use crate::keys::{KeyPair,PublicKey};
 pub use crate::mount::Mount;
 pub use crate::realmfs::RealmFS;
+pub use crate::keyring::KeyRing;
 
 const DEVKEYS_HEX: &str = "bc02a3a4fd4a0471a8cb2f96d8be0a0a2d060798c024e60d7a98482f23197fc0";
 
