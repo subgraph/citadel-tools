@@ -99,6 +99,10 @@ impl CommandLine {
         CommandLine::var_exists("citadel.verbose")
     }
 
+    pub fn debug() -> bool {
+        CommandLine::var_exists("citadel.debug")
+    }
+
 
     fn new() -> CommandLine {
         CommandLine{ varmap: HashMap::new() }
