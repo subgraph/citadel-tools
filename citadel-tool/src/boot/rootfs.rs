@@ -1,8 +1,9 @@
 use std::process::Command;
 
-use libcitadel::{BlockDev,ResourceImage,CommandLine,ImageHeader,Partition,Result,verity};
+use libcitadel::{BlockDev, ResourceImage, CommandLine, ImageHeader, Partition, Result, LoopDevice};
 use std::path::Path;
 use std::process::Stdio;
+use libcitadel::verity::Verity;
 
 pub fn setup_rootfs() -> Result<()> {
     let mut p = choose_boot_partiton(true)?;
@@ -25,9 +26,9 @@ fn setup_resource_unverified(img: &ResourceImage) -> Result<()> {
     if img.is_compressed() {
         img.decompress()?;
     }
-    let loopdev = img.create_loopdev()?;
-    info!("Loop device created: {}", loopdev.display());
-    setup_linear_mapping(&loopdev)
+    let loopdev = LoopDevice::create(img.path(), Some(4096), true)?;
+    info!("Loop device created: {}", loopdev);
+    setup_linear_mapping(loopdev.device())
 }
 
 fn setup_resource_verified(img: &ResourceImage) -> Result<()> {
@@ -52,7 +53,7 @@ fn setup_partition_verified(p: &mut Partition) -> Result<()> {
         }
         info!("Image signature is valid for channel {}", p.metainfo().channel());
     }
-    verity::setup_partition_device(p)?;
+    Verity::setup_partition(p)?;
     Ok(())
 }
 

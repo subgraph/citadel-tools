@@ -2,7 +2,6 @@ use std::path::{Path, PathBuf};
 use std::fs;
 
 use libcitadel::Result;
-use libcitadel::util;
 
 ///
 /// Represents a disk partition device on the system
@@ -73,14 +72,14 @@ impl DiskPartition {
     }
 
     pub fn mount<P: AsRef<Path>>(&self, target: P) -> Result<()> {
-        util::exec_cmdline("/usr/bin/mount", format!("{} {}", self.path.display(), target.as_ref().display()))
+        cmd!("/usr/bin/mount", "{} {}", self.path.display(), target.as_ref().display())
     }
 
     pub fn umount(&self) -> Result<()> {
-        util::exec_cmdline("/usr/bin/umount", self.path().to_str().unwrap())
+        cmd!("/usr/bin/umount", "{}", self.path().display())
     }
 
     fn partition_fstype(&self) -> Result<String> {
-        util::exec_cmdline_with_output("/usr/bin/lsblk", format!("-dno FSTYPE {}", self.path().display()))
+        cmd_with_output!("/usr/bin/lsblk", "-dno FSTYPE {}", self.path().display())
     }
 }

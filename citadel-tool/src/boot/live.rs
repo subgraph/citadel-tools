@@ -1,12 +1,11 @@
 
-use std::thread::{self,JoinHandle};
-use std::time;
 use std::path::Path;
 use std::ffi::OsStr;
 use std::fs;
+use std::thread::{self,JoinHandle};
+use std::time::{self,Instant};
 
 use libcitadel::Result;
-use libcitadel::util;
 use libcitadel::ResourceImage;
 use crate::boot::disks;
 use crate::boot::rootfs::setup_rootfs_resource;
@@ -22,6 +21,7 @@ pub fn live_rootfs() -> Result<()> {
 
 pub fn live_setup() -> Result<()> {
     decompress_images()?;
+    info!("Starting live setup");
     let live = Installer::new_livesetup();
     live.run()
 }
@@ -64,7 +64,7 @@ fn deploy_artifacts() -> Result<()> {
     let run_images = Path::new(IMAGE_DIRECTORY);
     if !run_images.exists() {
         fs::create_dir_all(run_images)?;
-        util::exec_cmdline("/bin/mount", "-t tmpfs -o size=4g images /run/citadel/images")?;
+        cmd!("/bin/mount", "-t tmpfs -o size=4g images /run/citadel/images")?;
     }
 
     for entry in fs::read_dir("/boot/images")? {
@@ -122,7 +122,7 @@ fn find_rootfs_image() -> Result<ResourceImage> {
 }
 
 fn decompress_images() -> Result<()> {
-    println!("decompressing images");
+    info!("Decompressing images");
     let mut threads = Vec::new();
     for entry in fs::read_dir("/run/citadel/images")? {
         let entry = entry?;
@@ -137,12 +137,20 @@ fn decompress_images() -> Result<()> {
     for t in threads {
         t.join().unwrap()?;
     }
+    info!("Finished decompressing images");
     Ok(())
 
 }
 
 fn decompress_one_image(image: ResourceImage) -> JoinHandle<Result<()>> {
-    thread::spawn(move ||{
-        image.decompress()
+    thread::spawn(move || {
+        let start = Instant::now();
+        info!("Decompressing {}", image.path().display());
+        image.decompress()?;
+        cmd!("/usr/bin/du", "-h {}", image.path().display())?;
+        info!("Decompress {:?} finished in {} seconds",
+              image.path().file_name().unwrap(),
+              start.elapsed().as_secs());
+        Ok(())
     })
 }
