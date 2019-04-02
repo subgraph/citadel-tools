@@ -3,8 +3,9 @@ use std::process::exit;
 
 use clap::{App,Arg,SubCommand,ArgMatches};
 use clap::AppSettings::*;
-use libcitadel::{Result,ResourceImage,set_verbose,format_error,Partition,KeyPair,ImageHeader};
+use libcitadel::{Result,ResourceImage,Logger,LogLevel,format_error,Partition,KeyPair,ImageHeader,devkeys};
 use std::fs;
+use hex;
 
 pub fn main(args: Vec<String>) {
 
@@ -13,6 +14,12 @@ pub fn main(args: Vec<String>) {
         .settings(&[ArgRequiredElseHelp,ColoredHelp, DisableHelpSubcommand, DisableVersion, DeriveDisplayOrder])
 
         .subcommand(SubCommand::with_name("metainfo")
+            .about("Display metainfo variables for an image file")
+            .arg(Arg::with_name("path")
+                .required(true)
+                .help("Path to image file")))
+
+        .subcommand(SubCommand::with_name("info")
             .about("Display metainfo variables for an image file")
             .arg(Arg::with_name("path")
                 .required(true)
@@ -63,11 +70,12 @@ pub fn main(args: Vec<String>) {
                 .required(true)
                 .help("Path to image file")));
 
-    set_verbose(true);
+    Logger::set_log_level(LogLevel::Debug);
 
     let matches = app.get_matches_from(args);
     let result = match matches.subcommand() {
         ("metainfo", Some(m)) => metainfo(m),
+        ("info", Some(m)) => info(m),
         ("generate-verity", Some(m)) => generate_verity(m),
         ("verify", Some(m)) => verify(m),
         ("sign-image", Some(m)) => sign_image(m),
@@ -86,6 +94,31 @@ pub fn main(args: Vec<String>) {
     }
 }
 
+fn info(arg_matches: &ArgMatches) -> Result<()> {
+    let img = load_image(arg_matches)?;
+    print!("{}",String::from_utf8(img.header().metainfo_bytes())?);
+    info_signature(&img)?;
+    Ok(())
+}
+
+fn info_signature(img: &ResourceImage) -> Result<()> {
+    if img.header().has_signature() {
+        println!("Signature: {}", hex::encode(&img.header().signature()));
+    } else {
+        println!("Signature: No Signature");
+    }
+    match img.header().public_key()? {
+        Some(pubkey) => {
+            if img.header().verify_signature(pubkey) {
+                println!("Signature is valid");
+            } else {
+                println!("Signature verify FAILED");
+            }
+        },
+        None => { println!("No public key found for channel '{}'", img.metainfo().channel()) },
+    }
+   Ok(())
+}
 fn metainfo(arg_matches: &ArgMatches) -> Result<()> {
     let img = load_image(arg_matches)?;
     print!("{}",String::from_utf8(img.header().metainfo_bytes())?);
