@@ -4,10 +4,11 @@ use std::fs::{self,File};
 use std::io::{self,Write};
 
 use failure::ResultExt;
-use libcitadel::{Result,ImageHeader,verity,util,devkeys};
+use libcitadel::{Result,ImageHeader,devkeys};
 
 use super::config::BuildConfig;
 use std::path::Path;
+use libcitadel::verity::Verity;
 
 pub struct UpdateBuilder {
     config: BuildConfig,
@@ -100,7 +101,7 @@ impl UpdateBuilder {
     }
 
     fn calculate_shasum(&mut self) -> Result<()> {
-        let output = util::exec_cmdline_with_output("sha256sum", self.image().display().to_string())
+        let output = cmd_with_output!("sha256sum", "{}", self.image().display())
             .context(format!("failed to calculate sha256 on {}", self.image().display()))?;
         let v: Vec<&str> = output.split_whitespace().collect();
         let shasum = v[0].trim().to_owned();
@@ -111,8 +112,7 @@ impl UpdateBuilder {
 
     fn prepend_empty_block(&mut self) -> Result<()> {
         let tmpfile = self.image().with_extension("tmp");
-        let args = format!("if={} of={} bs=4096 seek=1 conv=sparse", self.image().display(), tmpfile.display());
-        util::exec_cmdline("/usr/bin/dd", args)?;
+        cmd!("/usr/bin/dd", "if={} of={} bs=4096 seek=1 conv=sparse", self.image().display(), tmpfile.display())?;
         fs::rename(tmpfile, self.image())?;
         Ok(())
     }
@@ -121,17 +121,17 @@ impl UpdateBuilder {
         let hashfile = self.config.workdir_path(self.verity_filename());
         let outfile = self.config.workdir_path("verity-format.out");
 
-        let verity = verity::generate_initial_hashtree(self.image(), &hashfile)?;
+        let output = Verity::new(self.image()).generate_initial_hashtree(&hashfile)?;
 
-        fs::write(outfile, verity.output())
+        fs::write(outfile, output.output())
             .context("failed to write veritysetup command output to a file")?;
 
-        let root = match verity.root_hash() {
+        let root = match output.root_hash() {
             Some(s) => s.to_owned(),
             None => bail!("no root hash found in verity format output"),
         };
 
-        let salt = match verity.salt() {
+        let salt = match output.salt() {
             Some(s) => s.to_owned(),
             None => bail!("no verity salt found in verity format output"),
         };
@@ -147,7 +147,7 @@ impl UpdateBuilder {
     fn compress_image(&self) -> Result<()> {
         if self.config.compress() {
             info!("Compressing image data");
-            util::exec_cmdline("xz", format!("-T0 {}", self.image().display()))
+            cmd!("xz", "-T0 {}", self.image().display())
                 .context(format!("failed to compress {}", self.image().display()))?;
             // Rename back to original image_data filename
             fs::rename(self.image().with_extension("xz"), self.image())?;
@@ -180,7 +180,7 @@ impl UpdateBuilder {
 
         let metainfo = self.generate_metainfo();
         fs::write(self.config.workdir_path("metainfo"), &metainfo)?;
-        hdr.set_metainfo_bytes(&metainfo);
+        hdr.set_metainfo_bytes(&metainfo)?;
 
         if self.config.channel() == "dev" {
             let sig = devkeys().sign(&metainfo);
