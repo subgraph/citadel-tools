@@ -1,6 +1,7 @@
 [workspace]
-members = ["citadel-desktopd", "citadel-realms", "citadel-tool" ]
+members = ["citadel-realms", "citadel-tool" ]
 [profile.release]
 lto = true
 codegen-units = 1
 incremental = false
+
