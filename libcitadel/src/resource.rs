@@ -3,9 +3,12 @@ use std::ffi::OsStr;
 use std::io::{self,Seek,SeekFrom};
 use std::path::{Path, PathBuf};
 
-use crate::{CommandLine,OsRelease,ImageHeader,MetaInfo,Result,Partition,Mount,verity,util};
+use crate::{CommandLine, OsRelease, ImageHeader, MetaInfo, Result, Partition, Mounts, util, LoopDevice};
 
 use failure::ResultExt;
+use std::sync::Arc;
+use crate::UtsName;
+use crate::verity::Verity;
 
 const STORAGE_BASEDIR: &str = "/sysroot/storage/resources";
 const RUN_DIRECTORY: &str = "/run/citadel/images";
@@ -30,7 +33,6 @@ const RUN_DIRECTORY: &str = "/run/citadel/images";
 pub struct ResourceImage {
     path: PathBuf,
     header: ImageHeader,
-    metainfo: MetaInfo,
 }
 
 impl ResourceImage {
@@ -77,8 +79,7 @@ impl ResourceImage {
         if !header.is_magic_valid() {
             bail!("Image file {} does not have a valid header", path.as_ref().display());
         }
-        let metainfo = header.metainfo()?;
-        Ok(ResourceImage::new(path.as_ref(), header, metainfo))
+        Ok(ResourceImage::new(path.as_ref(), header ))
     }
 
     pub fn is_valid_image(&self) -> bool {
@@ -90,20 +91,24 @@ impl ResourceImage {
         &self.path
     }
 
+    fn verity(&self) -> Verity {
+        Verity::new(self.path())
+    }
+
     pub fn header(&self) -> &ImageHeader {
         &self.header
     }
 
-    pub fn metainfo(&self) -> &MetaInfo {
-        &self.metainfo
+    pub fn metainfo(&self) -> Arc<MetaInfo> {
+        self.header.metainfo()
     }
 
-    fn new(path: &Path, header: ImageHeader, metainfo: MetaInfo) -> ResourceImage {
+    fn new(path: &Path, header: ImageHeader) -> ResourceImage {
         assert_eq!(path.extension(), Some(OsStr::new("img")), "image filename must have .img extension");
 
         ResourceImage {
             path: path.to_owned(),
-            header, metainfo,
+            header,
         }
     }
 
@@ -147,7 +152,7 @@ impl ResourceImage {
     }
 
     pub fn write_to_partition(&self, partition: &Partition) -> Result<()> {
-        if self.metainfo.image_type() != "rootfs" {
+        if self.metainfo().image_type() != "rootfs" {
             bail!("Cannot write to partition, image type is not rootfs");
         }
 
@@ -156,9 +161,13 @@ impl ResourceImage {
         }
 
         info!("writing rootfs image to {}", partition.path().display());
+        cmd_with_output!("/bin/dd", "if={} of={} bs=4096 skip=1", self.path.display(), partition.path().display())?;
+
+        /*
         let args = format!("if={} of={} bs=4096 skip=1",
                            self.path.display(), partition.path().display());
         util::exec_cmdline_quiet("/bin/dd", args)?;
+        */
 
         self.header.set_status(ImageHeader::STATUS_NEW);
         self.header.write_partition(partition.path())?;
@@ -184,15 +193,18 @@ impl ResourceImage {
                     if !self.header.verify_signature(pubkey) {
                         bail!("Header signature verification failed");
                     }
+                    info!("Image header signature is valid");
                 }
-                None => bail!("Cannot verify header signature because no public key for channel {} is available", self.metainfo.channel())
+                None => bail!("Cannot verify header signature because no public key for channel {} is available", self.metainfo().channel())
             }
         }
         info!("Setting up dm-verity device for image");
         if !self.has_verity_hashtree() {
             self.generate_verity_hashtree()?;
         }
-        verity::setup_image_device(self.path(), self.metainfo())
+        let devname = self.verity().setup(&self.metainfo())?;
+        Ok(Path::new("/dev/mapper").join(devname))
+//        verity::setup_image_device(self.path(), &self.metainfo())
     }
 
     pub fn generate_verity_hashtree(&self) -> Result<()> {
@@ -203,7 +215,8 @@ impl ResourceImage {
             self.decompress()?;
         }
         info!("Generating dm-verity hash tree for image {}", self.path.display());
-        verity::generate_image_hashtree(self.path(), self.metainfo())?;
+//        verity::generate_image_hashtree(self.path(), self.metainfo().nblocks(), self.metainfo().verity_salt())?;
+        self.verity().generate_image_hashtree(&self.metainfo())?;
         self.header.set_flag(ImageHeader::FLAG_HASH_TREE);
         self.header.write_header_to(self.path())?;
         Ok(())
@@ -214,7 +227,8 @@ impl ResourceImage {
             self.generate_verity_hashtree()?;
         }
         info!("Verifying dm-verity hash tree");
-        verity::verify_image(self.path(), self.metainfo())
+        self.verity().verify(&self.metainfo())
+//        verity::verify_image(self.path(), &self.metainfo())
     }
 
     pub fn generate_shasum(&self) -> Result<String> {
@@ -222,7 +236,7 @@ impl ResourceImage {
             self.decompress()?;
         }
         info!("Calculating sha256 of image");
-        let output = util::exec_cmdline_pipe_input("sha256sum", "-", self.path(), util::FileRange::Range{offset: 4096, len: self.metainfo.nblocks() * 4096})
+        let output = util::exec_cmdline_pipe_input("sha256sum", "-", self.path(), util::FileRange::Range{offset: 4096, len: self.metainfo().nblocks() * 4096})
             .context(format!("failed to calculate sha256 on {}", self.path().display()))?;
         let v: Vec<&str> = output.split_whitespace().collect();
         let shasum = v[0].trim().to_owned();
@@ -240,28 +254,23 @@ impl ResourceImage {
         }
 
         let mount_path = self.mount_path();
-        let loopdev = self.create_loopdev()?;
+        let loopdev = LoopDevice::create(self.path(), Some(4096), true)?;
 
-        info!("Loop device created: {}", loopdev.display());
+        info!("Loop device created: {}", loopdev);
         info!("Mounting to: {}", mount_path.display());
 
         fs::create_dir_all(&mount_path)?;
 
-        util::mount(&loopdev.to_string_lossy(), mount_path, Some("-oro"))
-    }
-
-    pub fn create_loopdev(&self) -> Result<PathBuf> {
-        let args = format!("--offset 4096 -f --read-only --show {}", self.path.display());
-        let output = util::exec_cmdline_with_output("/sbin/losetup", args)?;
-        Ok(PathBuf::from(output))
+        util::mount(&loopdev.device_str(), mount_path, Some("-oro"))
     }
 
     // Return the path at which to mount this resource image.
     fn mount_path(&self) -> PathBuf {
-        if self.metainfo.image_type() == "realmfs" {
-            PathBuf::from(format!("{}/{}-realmfs.mountpoint", RUN_DIRECTORY, self.metainfo.realmfs_name().expect("realmfs image has no name")))
+        let metainfo = self.metainfo();
+        if metainfo.image_type() == "realmfs" {
+            PathBuf::from(format!("{}/{}-realmfs.mountpoint", RUN_DIRECTORY, metainfo.realmfs_name().expect("realmfs image has no name")))
         } else {
-            PathBuf::from(format!("{}/{}.mountpoint", RUN_DIRECTORY, self.metainfo.image_type()))
+            PathBuf::from(format!("{}/{}.mountpoint", RUN_DIRECTORY, metainfo.image_type()))
         }
     }
 
@@ -309,8 +318,8 @@ impl ResourceImage {
 
     // If the /storage directory is not mounted, attempt to mount it.
     // Return true if already mounted or if the attempt to mount it succeeds.
-    fn ensure_storage_mounted() -> Result<bool> {
-        if Mount::is_source_mounted("/dev/mapper/citadel-storage")? {
+    pub fn ensure_storage_mounted() -> Result<bool> {
+        if Mounts::is_source_mounted("/dev/mapper/citadel-storage")? {
             return Ok(true);
         }
         let path = Path::new("/dev/mapper/citadel-storage");
@@ -351,7 +360,7 @@ fn search_directory<P: AsRef<Path>>(dir: P, image_type: &str, channel: Option<&s
     let mut best = None;
 
     let mut matches = all_matching_images(dir.as_ref(), image_type, channel)?;
-    info!("Found {} matching images", matches.len());
+    debug!("Found {} matching images", matches.len());
 
     if channel.is_none() {
         if matches.is_empty() {
@@ -408,7 +417,7 @@ fn parse_timestamp(img: &ResourceImage) -> Result<usize> {
 }
 
 fn current_kernel_version() -> String {
-    let utsname = util::uname();
+    let utsname = UtsName::uname();
     let v = utsname.release().split("-").collect::<Vec<_>>();
     v[0].to_string()
 }
@@ -461,9 +470,9 @@ fn maybe_add_dir_entry(entry: DirEntry,
         return Ok(())
     }
 
-    let metainfo = header.metainfo()?;
+    let metainfo = header.metainfo();
 
-    info!("Found an image type={} channel={} kernel={:?}", metainfo.image_type(), metainfo.channel(), metainfo.kernel_version());
+    debug!("Found an image type={} channel={} kernel={:?}", metainfo.image_type(), metainfo.channel(), metainfo.kernel_version());
 
     if let Some(channel) = channel {
         if metainfo.channel() != channel {
@@ -481,7 +490,7 @@ fn maybe_add_dir_entry(entry: DirEntry,
         }
     }
 
-    images.push(ResourceImage::new(&path, header, metainfo));
+    images.push(ResourceImage::new(&path, header));
 
     Ok(())
 }

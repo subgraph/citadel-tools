@@ -1,6 +1,7 @@
 use std::path::{Path,PathBuf};
 use std::fs;
-use crate::{Result,ImageHeader,MetaInfo,Mount,PublicKey,public_key_for_channel};
+use crate::{Result,ImageHeader,MetaInfo,Mounts,PublicKey,public_key_for_channel};
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct Partition {
@@ -11,8 +12,7 @@ pub struct Partition {
 
 #[derive(Clone)]
 struct HeaderInfo {
-    header: ImageHeader,
-    metainfo: MetaInfo,
+    header: Arc<ImageHeader>,
     // None if no public key available for channel named in metainfo
     pubkey: Option<PublicKey>,
 }
@@ -39,14 +39,8 @@ impl Partition {
         if !header.is_magic_valid() {
             return Ok(None);
         }
-        let metainfo = match header.metainfo() {
-            Ok(metainfo) => metainfo,
-            Err(e) => {
-                warn!("Reading partition {}: {}", dev.display(), e);
-                return Ok(None);
-            },
-        };
 
+        let metainfo = header.metainfo();
         let pubkey = match public_key_for_channel(metainfo.channel()) {
             Ok(result) => result,
             Err(err) => {
@@ -55,8 +49,9 @@ impl Partition {
             }
         };
 
+        let header = Arc::new(header);
         Ok(Some(HeaderInfo {
-            header, metainfo, pubkey,
+            header, pubkey,
         }))
     }
 
@@ -84,14 +79,9 @@ impl Partition {
         &self.hinfo.as_ref().unwrap().header
     }
 
-    fn header_mut(&mut self) -> &mut ImageHeader {
+    pub fn metainfo(&self) -> Arc<MetaInfo> {
         assert!(self.is_initialized());
-        &mut self.hinfo.as_mut().unwrap().header
-    }
-
-    pub fn metainfo(&self) -> &MetaInfo {
-        assert!(self.is_initialized());
-        &self.hinfo.as_ref().unwrap().metainfo
+        self.hinfo.as_ref().unwrap().header.metainfo()
     }
 
     pub fn is_new(&self) -> bool {
@@ -116,7 +106,6 @@ impl Partition {
                 return pubkey.verify(
                     &self.header().metainfo_bytes(),
                     &self.header().signature())
-
             }
         }
         false
@@ -131,17 +120,17 @@ impl Partition {
     }
 
     pub fn write_status(&mut self, status: u8) -> Result<()> {
-        self.header_mut().set_status(status);
+        self.header().set_status(status);
         self.header().write_partition(&self.path)
     }
 
     pub fn set_flag_and_write(&mut self, flag: u8) -> Result<()> {
-        self.header_mut().set_flag(flag);
+        self.header().set_flag(flag);
         self.header().write_partition(&self.path)
     }
 
     pub fn clear_flag_and_write(&mut self, flag: u8) -> Result<()> {
-        self.header_mut().clear_flag(flag);
+        self.header().clear_flag(flag);
         self.header().write_partition(&self.path)
     }
 
@@ -176,7 +165,7 @@ impl Partition {
 }
 
 fn is_in_use(path: &Path) -> Result<bool> {
-    if Mount::is_source_mounted(path)? {
+    if Mounts::is_source_mounted(path)? {
         return Ok(true);
     }
     let holders = count_block_holders(path)?;
