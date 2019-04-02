@@ -3,39 +3,8 @@
 #[macro_use] extern crate serde_derive;
 #[macro_use] extern crate lazy_static;
 
-#[macro_export]
-macro_rules! info {
-    ($e:expr) => { if $crate::verbose() { println!("[+] {}", $e);} };
-    ($fmt:expr, $($arg:tt)+) => { if $crate::verbose() { println!("[+] {}", format!($fmt, $($arg)+));} };
-}
-#[macro_export]
-macro_rules! warn {
-    ($e:expr) => { println!("WARNING: {}", $e); };
-    ($fmt:expr, $($arg:tt)+) => { println!("WARNING: {}", format!($fmt, $($arg)+)); };
-}
-
-#[macro_export]
-macro_rules! notify {
-    ($e:expr) => { println!("[+] {}", $e); };
-    ($fmt:expr, $($arg:tt)+) => { println!("[+] {}", format!($fmt, $($arg)+)); };
-}
-
-use std::cell::RefCell;
 use std::result;
-
 use failure::Error;
-
-thread_local! {
-    pub static VERBOSE: RefCell<bool> = RefCell::new(false);
-}
-
-pub fn verbose() -> bool {
-    VERBOSE.with(|f| { *f.borrow() })
-}
-
-pub fn set_verbose(val: bool) {
-    VERBOSE.with(|f| { *f.borrow_mut() = val });
-}
 
 pub fn format_error(err: &Error) -> String {
     let mut output = err.to_string();
@@ -48,6 +17,8 @@ pub fn format_error(err: &Error) -> String {
     output
 }
 
+#[macro_use] mod log;
+#[macro_use] mod exec;
 mod blockdev;
 mod config;
 mod keys;
@@ -57,9 +28,13 @@ mod partition;
 mod resource;
 pub mod util;
 pub mod verity;
-mod mount;
 mod realmfs;
 mod keyring;
+pub mod symlink;
+mod realm;
+pub mod terminal;
+mod system;
+
 
 pub use crate::config::OsRelease;
 pub use crate::blockdev::BlockDev;
@@ -67,10 +42,20 @@ pub use crate::cmdline::CommandLine;
 pub use crate::header::{ImageHeader,MetaInfo};
 pub use crate::partition::Partition;
 pub use crate::resource::ResourceImage;
-pub use crate::keys::{KeyPair,PublicKey};
-pub use crate::mount::Mount;
-pub use crate::realmfs::RealmFS;
-pub use crate::keyring::KeyRing;
+pub use crate::keys::{KeyPair,PublicKey,Signature};
+pub use crate::realmfs::{RealmFS,Mountpoint,Activation};
+pub use crate::keyring::{KeyRing,KernelKey};
+pub use crate::exec::{Exec,FileRange};
+pub use crate::realmfs::resizer::{ImageResizer,ResizeSize};
+pub use crate::realm::overlay::RealmOverlay;
+pub use crate::realm::realm::Realm;
+pub use crate::realm::config::{RealmConfig,OverlayType,GLOBAL_CONFIG};
+pub use crate::realm::events::RealmEvent;
+pub use crate::realm::realms::Realms;
+pub use crate::realm::manager::RealmManager;
+pub use crate::log::{LogLevel,Logger,DefaultLogOutput,LogOutput};
+
+pub use crate::system::{FileLock,Mounts,LoopDevice,UtsName};
 
 const DEVKEYS_HEX: &str = "bc02a3a4fd4a0471a8cb2f96d8be0a0a2d060798c024e60d7a98482f23197fc0";
 
@@ -106,3 +91,4 @@ pub fn public_key_for_channel(channel: &str) -> Result<Option<PublicKey>> {
 pub type Result<T> = result::Result<T,Error>;
 
 pub const BLOCK_SIZE: usize = 4096;
+
