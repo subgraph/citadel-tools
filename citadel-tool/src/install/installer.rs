@@ -1,37 +1,19 @@
 use std::cell::RefCell;
 use std::fs::{self,File};
-use std::io::Write;
+use std::io::{self,Write};
 use std::os::unix::fs as unixfs;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::Instant;
 
-use libcitadel::util::{self,mount,exec_cmdline_with_output};
+use libcitadel::util;
 use libcitadel::RealmFS;
 use libcitadel::Result;
 use libcitadel::OsRelease;
 use libcitadel::KeyRing;
-
-const BLKDEACTIVATE: &str = "/sbin/blkdeactivate";
-const CRYPTSETUP: &str = "/sbin/cryptsetup";
-const PARTED: &str = "/sbin/parted";
-const EXTLINUX: &str = "/sbin/extlinux";
-const PVCREATE: &str = "/sbin/pvcreate";
-const VGCREATE: &str = "/sbin/vgcreate";
-const LVCREATE: &str = "/sbin/lvcreate";
-const VGCHANGE: &str = "/sbin/vgchange";
-const MKFS_VFAT: &str = "/sbin/mkfs.vfat";
-const MKFS_BTRFS: &str = "/bin/mkfs.btrfs";
-const LSBLK: &str = "/bin/lsblk";
-const BTRFS: &str = "/bin/btrfs";
-const MOUNT: &str = "/bin/mount";
-const UMOUNT: &str = "/bin/umount";
-const CHOWN: &str = "/bin/chown";
-const CP: &str = "/bin/cp";
-const TAR: &str = "/bin/tar";
-const XZ: &str = "/bin/xz";
-const DD: &str = "/bin/dd";
-const CITADEL_IMAGE: &str = "/usr/bin/citadel-image";
+use libcitadel::terminal::Base16Scheme;
+use libcitadel::UtsName;
 
 const LUKS_UUID: &str = "683a17fc-4457-42cc-a946-cde67195a101";
 
@@ -44,18 +26,90 @@ const DEFAULT_ARTIFACT_DIRECTORY: &str = "/run/citadel/images";
 
 const KERNEL_CMDLINE: &str = "add_efi_memmap intel_iommu=off cryptomgr.notests rcupdate.rcu_expedited=1 rcu_nocbs=0-64 tsc=reliable no_timer_check noreplace-smp i915.fastboot=1 quiet splash";
 
-const MAIN_REALM_CONFIG: &str =
-r###"\
-realmfs = "main"
-realmfs-write = true
-"###;
+const GLOBAL_REALM_CONFIG: &str = "\
+realmfs = 'main'
+realm-depends = ['apt-cacher']
+";
 
-const LIVE_REALM_CONFIG: &str =
-r###"\
-realmfs = "base"
-realmfs-write = false
-"###;
+const LIVE_REALM_CONFIG: &str = "\
+realmfs = 'base'
+overlay = 'tmpfs'
+realm-depends = ['apt-cacher']
+";
 
+const APT_CACHER_CONFIG: &str = "\
+use-shared-dir = false
+use-sound = false
+use-x11 = false
+use-wayland = false
+system-realm = true
+reserved-ip = 213
+extra-bindmounts-ro = [ '/usr/share/apt-cacher-ng' ]
+";
+
+const MAIN_CONFIG: &str = "\
+terminal-scheme = '$SCHEME'
+";
+
+const MAIN_TERMINAL_SCHEME: &str = "embers";
+
+const PARTITION_COMMANDS: &[&str] = &[
+    "/sbin/blkdeactivate $TARGET",
+    "/sbin/parted -s $TARGET mklabel gpt",
+    "/sbin/parted -s $TARGET mkpart boot fat32 1MiB 513MiB",
+    "/sbin/parted -s $TARGET set 1 boot on",
+    "/sbin/parted -s $TARGET mkpart data ext4 513MiB 100%",
+    "/sbin/parted -s $TARGET set 2 lvm on",
+];
+
+const LUKS_COMMANDS: &[&str] =  &[
+    "/sbin/cryptsetup -q --uuid=$LUKS_UUID luksFormat $LUKS_PARTITION $LUKS_PASSFILE",
+    "/sbin/cryptsetup open --type luks --key-file $LUKS_PASSFILE $LUKS_PARTITION luks-install",
+];
+
+const LVM_COMMANDS: &[&str] = &[
+    "/sbin/pvcreate -ff --yes /dev/mapper/luks-install",
+    "/sbin/vgcreate --yes citadel /dev/mapper/luks-install",
+    "/sbin/lvcreate --yes --size 2g --name rootfsA citadel",
+    "/sbin/lvcreate --yes --size 2g --name rootfsB citadel",
+    "/sbin/lvcreate --yes --extents 100%VG --name storage citadel",
+];
+
+const CREATE_STORAGE_COMMANDS: &[&str] = &[
+    "/bin/mkfs.btrfs /dev/mapper/citadel-storage",
+    "/bin/mount /dev/mapper/citadel-storage $INSTALL_MOUNT",
+];
+
+const FINISH_COMMANDS: &[&str] = &[
+    "/bin/lsblk -o NAME,SIZE,TYPE,FSTYPE $TARGET",
+    "/sbin/vgchange -an citadel",
+    "/sbin/cryptsetup luksClose luks-install",
+];
+
+const LOADER_CONF: &str = "\
+default citadel
+timeout 5
+";
+
+const BOOT_CONF: &str = "\
+title Subgraph OS (Citadel)
+linux /bzImage
+options root=/dev/mapper/rootfs $KERNEL_CMDLINE
+";
+
+const SYSLINUX_CONF: &str = "\
+UI menu.c32
+PROMPT 0
+
+MENU TITLE Boot Subgraph OS (Citadel)
+TIMEOUT 50
+DEFAULT subgraph
+
+LABEL subgraph
+    MENU LABEL Subgraph OS
+    LINUX ../bzImage
+    APPEND root=/dev/mapper/rootfs $KERNEL_CMDLINE
+";
 
 #[derive(PartialEq)]
 enum InstallType {
@@ -104,6 +158,10 @@ impl Installer {
         self.target_device.as_ref().expect("No target device")
     }
 
+    fn target_str(&self) -> &str {
+        self.target().to_str().unwrap()
+    }
+
     fn passphrase(&self) -> &str {
         self.passphrase.as_ref().expect("No passphrase")
     }
@@ -117,11 +175,6 @@ impl Installer {
     }
 
     pub fn verify(&self) -> Result<()> {
-        let tools = vec![
-            BLKDEACTIVATE,CRYPTSETUP,PARTED,EXTLINUX,PVCREATE,VGCREATE,LVCREATE,VGCHANGE,
-            MKFS_VFAT,MKFS_BTRFS,LSBLK,BTRFS,MOUNT,UMOUNT,CHOWN,TAR,XZ,CITADEL_IMAGE,
-        ];
-
         let kernel_img = self.kernel_imagename();
         let artifacts = vec![
             "bootx64.efi", "bzImage",
@@ -130,12 +183,6 @@ impl Installer {
 
         if !self.target().exists() {
             bail!("Target device {} does not exist", self.target().display());
-        }
-
-        for tool in tools {
-            if !Path::new(tool).exists() {
-                bail!("Required installer utility program does not exist: {}", tool);
-            }
         }
 
         for a in artifacts {
@@ -167,13 +214,15 @@ impl Installer {
         Ok(())
     }
 
-
     pub fn run_live_setup(&self) -> Result<()> {
-        self.cmd(MOUNT, "-t tmpfs var-tmpfs /sysroot/var")?;
-        self.cmd(MOUNT, "-t tmpfs home-tmpfs /sysroot/home")?;
-        self.cmd(MOUNT, "-t tmpfs storage-tmpfs /sysroot/storage")?;
+        self.cmd_list(&[
+            "/bin/mount -t tmpfs var-tmpfs /sysroot/var",
+            "/bin/mount -t tmpfs home-tmpfs /sysroot/home",
+            "/bin/mount -t tmpfs storage-tmpfs /sysroot/storage",
+        ], &[])?;
+
         fs::create_dir_all("/sysroot/storage/realms")?;
-        self.cmd(MOUNT, "--bind /sysroot/storage/realms /sysroot/realms")?;
+        self.cmd("/bin/mount --bind /sysroot/storage/realms /sysroot/realms")?;
 
         let cmdline = fs::read_to_string("/proc/cmdline")?;
         if cmdline.contains("citadel.live") {
@@ -183,7 +232,7 @@ impl Installer {
     }
 
     fn setup_live_realm(&self) -> Result<()> {
-        self.cmd(CITADEL_IMAGE, format!("decompress /run/citadel/images/base-realmfs.img"))?;
+
         let realmfs_dir = self.storage().join("realms/realmfs-images");
         let base_realmfs = realmfs_dir.join("base-realmfs.img");
 
@@ -192,48 +241,20 @@ impl Installer {
 
         self.info(format!("creating symlink {} -> {}", base_realmfs.display(), "/run/citadel/images/base-realmfs.img"))?;
         unixfs::symlink("/run/citadel/images/base-realmfs.img", &base_realmfs)?;
-        self.mount_realmfs()?;
+
+        let realmfs = RealmFS::load_from_path("/run/citadel/images/base-realmfs.img")?;
+        realmfs.activate()?;
 
         self.setup_storage()?;
 
-        /*
-        self.setup_main_realm()?;
-        fs::write(self.storage().join("realms/realm-main/config"), "realmfs = \"base\"")?;
-        let rootfs = self.storage().join("realms/realm-main/rootfs");
-        fs::remove_file(&rootfs)?;
-        unixfs::symlink("/run/citadel/images/base-realmfs.mountpoint", &rootfs)?;
-
-        self.info("Creating /Shared realms directory")?;
-        fs::create_dir_all(self.storage().join("realms/Shared"))?;
-        self.cmd(CHOWN, format!("1000:1000 {}/realms/Shared", self.storage().display()))?;
-        */
-        Ok(())
-    }
-
-    pub fn mount_realmfs(&self) -> Result<()> {
-        self.info("Creating loop device for /run/citadel/images/base-realmfs.img")?;
-        let args = format!("--offset 4096 -f --show /run/citadel/images/base-realmfs.img");
-        let loopdev = exec_cmdline_with_output("/sbin/losetup", args)?;
-        self.info("Mounting image at /run/citadel/images/base-realmfs.mountpoint")?;
-        fs::create_dir_all("/run/citadel/images/base-realmfs.mountpoint")?;
-        mount(&loopdev, "/run/citadel/images/base-realmfs.mountpoint", Some("-oro"))?;
         Ok(())
     }
 
     fn partition_disk(&self) -> Result<()> {
         self.header("Partitioning target disk")?;
-        self.cmd(BLKDEACTIVATE, self.target().display().to_string())?;
-        self.parted("mklabel gpt")?;
-        self.parted("mkpart boot fat32 1MiB 513MiB")?;
-        self.parted("set 1 boot on")?;
-        self.parted("mkpart data ext4 513MiB 100%")?;
-        self.parted("set 2 lvm on")?;
-        Ok(())
-    }
-
-    fn parted(&self, cmdline: &str) -> Result<()> {
-        let args = format!("-s {} {}", self.target().display(), cmdline);
-        self.cmd(PARTED, args)
+        self.cmd_list(PARTITION_COMMANDS, &[
+            ("$TARGET", self.target_str())
+        ])
     }
 
     fn setup_luks(&self) -> Result<()> {
@@ -242,46 +263,36 @@ impl Installer {
         fs::write(LUKS_PASSPHRASE_FILE, self.passphrase().as_bytes())?;
         let luks_partition = self.target_partition(2);
 
-        let args = format!(
-            "-q --uuid={} luksFormat {} {}",
-            LUKS_UUID, luks_partition, LUKS_PASSPHRASE_FILE
-        );
-        self.cmd(CRYPTSETUP, args)?;
+        self.cmd_list(LUKS_COMMANDS, &[
+            ("$LUKS_UUID", LUKS_UUID),
+            ("$LUKS_PARTITION", &luks_partition),
+            ("$LUKS_PASSFILE", LUKS_PASSPHRASE_FILE),
+        ])?;
 
-        let args = format!(
-            "open --type luks --key-file {} {} luks-install",
-            LUKS_PASSPHRASE_FILE, luks_partition
-        );
-        self.cmd(CRYPTSETUP, args)?;
         fs::remove_file(LUKS_PASSPHRASE_FILE)?;
         Ok(())
     }
 
     fn setup_lvm(&self) -> Result<()> {
         self.header("Setting up LVM volumes")?;
-        self.cmd(PVCREATE, "-ff --yes /dev/mapper/luks-install")?;
-        self.cmd(VGCREATE, "--yes citadel /dev/mapper/luks-install")?;
-
-        self.cmd(LVCREATE, "--yes --size 2g --name rootfsA citadel")?;
-        self.cmd(LVCREATE, "--yes --size 2g --name rootfsB citadel")?;
-        self.cmd(LVCREATE, "--yes --extents 100%VG --name storage citadel")?;
-        Ok(())
+        self.cmd_list(LVM_COMMANDS, &[])
     }
 
     fn setup_boot(&self) -> Result<()> {
         self.header("Setting up /boot partition")?;
         let boot_partition = self.target_partition(1);
-        self.cmd(MKFS_VFAT, format!("-F 32 {}", boot_partition))?;
+        self.cmd(format!("/sbin/mkfs.vfat -F 32 {}", boot_partition))?;
 
-        self.cmd(MOUNT, format!("{} {}", boot_partition, INSTALL_MOUNT))?;
+        self.cmd(format!("/bin/mount {} {}", boot_partition, INSTALL_MOUNT))?;
 
         fs::create_dir_all(format!("{}/loader/entries", INSTALL_MOUNT))?;
 
         self.info("Writing /boot/loader/loader.conf")?;
-        fs::write(format!("{}/loader/loader.conf", INSTALL_MOUNT), self.loader_conf())?;
+        fs::write(format!("{}/loader/loader.conf", INSTALL_MOUNT), LOADER_CONF)?;
 
         self.info("Writing /boot/entries/citadel.conf")?;
-        fs::write(format!("{}/loader/entries/citadel.conf", INSTALL_MOUNT), self.boot_conf())?;
+        fs::write(format!("{}/loader/entries/citadel.conf", INSTALL_MOUNT),
+                  BOOT_CONF.replace("$KERNEL_CMDLINE", KERNEL_CMDLINE))?;
 
         self.copy_artifact("bzImage", INSTALL_MOUNT)?;
         self.copy_artifact("bootx64.efi", format!("{}/EFI/BOOT", INSTALL_MOUNT))?;
@@ -290,28 +301,13 @@ impl Installer {
             self.setup_syslinux()?;
         }
 
-        self.cmd(UMOUNT, INSTALL_MOUNT)?;
+        self.cmd(format!("/bin/umount {}", INSTALL_MOUNT))?;
 
         if self.install_syslinux {
             self.setup_syslinux_post_umount()?;
         }
 
         Ok(())
-    }
-
-    fn loader_conf(&self) -> Vec<u8> {
-        let mut v = Vec::new();
-        writeln!(&mut v, "default citadel").unwrap();
-        writeln!(&mut v, "timeout 5").unwrap();
-        v
-    }
-
-    fn boot_conf(&self) -> Vec<u8> {
-        let mut v = Vec::new();
-        writeln!(&mut v, "title Subgraph OS (Citadel)").unwrap();
-        writeln!(&mut v, "linux /bzImage").unwrap();
-        writeln!(&mut v, "options root=/dev/mapper/rootfs {}", KERNEL_CMDLINE).unwrap();
-        v
     }
 
     fn setup_syslinux(&self) -> Result<()> {
@@ -328,8 +324,9 @@ impl Installer {
             fs::copy(entry.path(), dst.join(entry.file_name()))?;
         }
         self.info("Writing syslinux.cfg")?;
-        fs::write(dst.join("syslinux.cfg"), self.syslinux_conf())?;
-        self.cmd(EXTLINUX, format!("--install {}", dst.display()))?;
+        fs::write(dst.join("syslinux.cfg"),
+                  SYSLINUX_CONF.replace("$KERNEL_CMDLINE", KERNEL_CMDLINE))?;
+        self.cmd(format!("/sbin/extlinux --install {}", dst.display()))?;
         Ok(())
     }
 
@@ -338,34 +335,19 @@ impl Installer {
         if !mbrbin.exists() {
             bail!("Could not find MBR image: {}", mbrbin.display());
         }
-        let args = format!("bs=440 count=1 conv=notrunc if={} of={}", mbrbin.display(), self.target().display());
-        self.cmd(DD, args)?;
-        self.parted("set 1 legacy_boot on")?;
-        Ok(())
-    }
+        self.cmd(format!("/bin/dd bs=440 count=1 conv=notrunc if={} of={}", mbrbin.display(), self.target().display()))?;
+        self.cmd(format!("/sbin/parted -s {} set 1 legacy_boot on", self.target_str()))
 
-    fn syslinux_conf(&self) -> Vec<u8> {
-        let mut v = Vec::new();
-        writeln!(&mut v, "UI menu.c32").unwrap();
-        writeln!(&mut v, "PROMPT 0").unwrap();
-        writeln!(&mut v, "").unwrap();
-        writeln!(&mut v, "MENU TITLE Boot Subgraph OS (Citadel)").unwrap();
-        writeln!(&mut v, "TIMEOUT 50").unwrap();
-        writeln!(&mut v, "DEFAULT subgraph").unwrap();
-        writeln!(&mut v, "").unwrap();
-        writeln!(&mut v, "LABEL subgraph").unwrap();
-        writeln!(&mut v, "    MENU LABEL Subgraph OS").unwrap();
-        writeln!(&mut v, "    LINUX ../bzImage").unwrap();
-        writeln!(&mut v, "    APPEND root=/dev/mapper/rootfs {}", KERNEL_CMDLINE).unwrap();
-        v
     }
 
     fn create_storage(&self) -> Result<()> {
         self.header("Setting up /storage partition")?;
-        self.cmd(MKFS_BTRFS, "/dev/mapper/citadel-storage")?;
-        self.cmd(MOUNT, format!("/dev/mapper/citadel-storage {}", INSTALL_MOUNT))?;
+
+        self.cmd_list(CREATE_STORAGE_COMMANDS,
+                      &[("$INSTALL_MOUNT", INSTALL_MOUNT)])?;
+
         self.setup_storage()?;
-        self.cmd(UMOUNT, INSTALL_MOUNT)?;
+        self.cmd(format!("/bin/umount {}", INSTALL_MOUNT))?;
         Ok(())
     }
 
@@ -376,17 +358,24 @@ impl Installer {
             self.setup_base_realmfs()?;
         }
 
+        self.setup_realm_skel()?;
         self.setup_main_realm()?;
+        self.setup_apt_cacher_realm()?;
+
+        self.info("Creating global realm config file")?;
+        fs::write(self.storage().join("realms/config"), self.global_realm_config())?;
 
         self.info("Creating /Shared realms directory")?;
-        fs::create_dir_all(self.storage().join("realms/Shared"))?;
-        self.cmd(CHOWN, format!("1000:1000 {}/realms/Shared", self.storage().display()))?;
+
+        let shared = self.storage().join("realms/Shared");
+        fs::create_dir_all(&shared)?;
+        util::chown_user(&shared)?;
 
         Ok(())
     }
 
     fn create_keyring(&self) -> Result<()> {
-        self.header("Creating initial keyring")?;
+        self.info("Creating initial keyring")?;
         let keyring = KeyRing::create_new();
         keyring.write(self.storage().join("keyring"), self.passphrase.as_ref().unwrap())
     }
@@ -395,13 +384,15 @@ impl Installer {
         let realmfs_dir = self.storage().join("realms/realmfs-images");
         fs::create_dir_all(&realmfs_dir)?;
         self.sparse_copy_artifact("base-realmfs.img", &realmfs_dir)?;
-        self.cmd(CITADEL_IMAGE, format!("decompress {}/base-realmfs.img", realmfs_dir.display()))?;
+        self.cmd(format!("/usr/bin/citadel-image decompress {}/base-realmfs.img", realmfs_dir.display()))?;
 
-        self.info("Creating main-realmfs as fork of base-realmfs")?;
-        let base_path = realmfs_dir.join("base-realmfs.img");
-        let base_image = RealmFS::load_from_path(base_path, "base")?;
-        base_image.fork("main")?;
-        fs::write(self.storage().join("realms/config"), "realmfs=\"main\"\n")?;
+        Ok(())
+    }
+
+    fn setup_realm_skel(&self) -> Result<()> {
+        let realm_skel = self.storage().join("realms/skel");
+        fs::create_dir_all(&realm_skel)?;
+        util::copy_tree_with_chown(&self.skel(), &realm_skel, (1000,1000))?;
         Ok(())
     }
 
@@ -413,26 +404,43 @@ impl Installer {
         self.info("Creating home directory /realms/realm-main/home")?;
         let home = realm.join("home");
         fs::create_dir_all(&home)?;
+        util::chown_user(&home)?;
 
-        self.info("Copying .bashrc and .profile into home diectory")?;
-        fs::copy(self.skel().join("bashrc"), home.join(".bashrc"))?;
-        fs::copy(self.skel().join("profile"), home.join(".profile"))?;
+        self.info("Copying /realms/skel into home diectory")?;
+        util::copy_tree(&self.storage().join("realms/skel"), &home)?;
 
-        self.cmd(CHOWN, format!("-R 1000:1000 {}", home.display()))?;
-
-        self.info("Creating main realm config file")?;
-        fs::write(realm.join("config"), self.main_realm_config())?;
-
-        /*
-        self.info("Creating rootfs symlink")?;
-        unixfs::symlink(
-            format!("/run/citadel/images/{}-realmfs.mountpoint", self.main_realmfs()),
-            format!("{}/rootfs", realm.display()))?;
-        */
+        if let Some(scheme) = Base16Scheme::by_name(MAIN_TERMINAL_SCHEME) {
+            scheme.write_realm_files(&home)?;
+            fs::write(realm.join("config"), MAIN_CONFIG.replace("$SCHEME", MAIN_TERMINAL_SCHEME))?;
+        }
+        util::chown_tree(&home, (1000,1000), false)?;
 
         self.info("Creating default.realm symlink")?;
-        unixfs::symlink("realm-main", self.storage().join("realms/default.realm"))?;
+        unixfs::symlink("/realms/realm-main", self.storage().join("realms/default.realm"))?;
 
+        fs::File::create(realm.join(".realmlock"))?;
+
+        Ok(())
+    }
+
+    fn setup_apt_cacher_realm(&self) -> Result<()> {
+        self.header("Creating apt-cacher realm")?;
+        let realm_base = self.storage().join("realms/realm-apt-cacher");
+
+        self.info("Creating home directory /realms/realm-apt-cacher/home")?;
+        let home = realm_base.join("home");
+        fs::create_dir_all(&home)?;
+        util::chown_user(&home)?;
+        let path = home.join("apt-cacher-ng");
+        fs::create_dir_all(&path)?;
+        util::chown_user(&path)?;
+
+        self.info("Copying /realms/skel into home diectory")?;
+        util::copy_tree(&self.storage().join("realms/skel"), &home)?;
+
+        self.info("Creating apt-cacher config file")?;
+        fs::write(realm_base.join("config"), APT_CACHER_CONFIG)?;
+        fs::File::create(realm_base.join(".realmlock"))?;
         Ok(())
     }
 
@@ -455,33 +463,23 @@ impl Installer {
     fn install_rootfs_partitions(&self) -> Result<()> {
         self.header("Installing rootfs partitions")?;
         let rootfs = self.artifact_path("citadel-rootfs.img");
-        self.cmd(CITADEL_IMAGE, format!("install-rootfs --skip-sha {}", rootfs.display()))?;
-        self.cmd(CITADEL_IMAGE, format!("install-rootfs --skip-sha --no-prefer {}", rootfs.display()))?;
+        self.cmd(format!("/usr/bin/citadel-image install-rootfs --skip-sha {}", rootfs.display()))?;
+        self.cmd(format!("/usr/bin/citadel-image install-rootfs --skip-sha --no-prefer {}", rootfs.display()))?;
         Ok(())
     }
 
     fn finish_install(&self) -> Result<()> {
-        self.cmd(LSBLK, format!("-o NAME,SIZE,TYPE,FSTYPE {}", self.target().display()))?;
-        self.cmd(VGCHANGE, "-an citadel")?;
-        self.cmd(CRYPTSETUP, "luksClose luks-install")?;
-        Ok(())
+        self.cmd_list(FINISH_COMMANDS, &[
+            ("$TARGET", self.target_str())
+        ])
     }
 
-    fn main_realm_config(&self) -> &str {
+    fn global_realm_config(&self) -> &str {
         match self._type {
-            InstallType::Install => MAIN_REALM_CONFIG,
+            InstallType::Install => GLOBAL_REALM_CONFIG,
             InstallType::LiveSetup => LIVE_REALM_CONFIG,
         }
     }
-
-    /*
-    fn main_realmfs(&self) -> &str {
-        match self._type {
-            InstallType::Install => "main",
-            InstallType::LiveSetup => "base",
-        }
-    }
-    */
 
     fn skel(&self) -> &Path{
         match self._type {
@@ -491,7 +489,7 @@ impl Installer {
     }
 
     fn kernel_imagename(&self) -> String {
-        let utsname = util::uname();
+        let utsname = UtsName::uname();
         let v = utsname.release().split("-").collect::<Vec<_>>();
         format!("citadel-kernel-{}.img", v[0])
     }
@@ -521,13 +519,12 @@ impl Installer {
         }
         let dst = target.join(filename);
         if sparse {
-            self.cmd(CP, format!("--sparse=always {} {}", src.display(), dst.display()))?;
+            self.cmd(format!("/bin/cp --sparse=always {} {}", src.display(), dst.display()))?;
         } else {
             fs::copy(src, dst)?;
         }
         Ok(())
     }
-
 
     fn header<S: AsRef<str>>(&self, s: S) -> Result<()> {
         self.output(format!("\n[+] {}\n", s.as_ref()))
@@ -539,25 +536,43 @@ impl Installer {
 
     fn output<S: AsRef<str>>(&self, s: S) -> Result<()> {
         println!("{}", s.as_ref());
+        io::stdout().flush()?;
+
         if let Some(ref file) = self.logfile {
             writeln!(file.borrow_mut(), "{}", s.as_ref())?;
+            file.borrow_mut().flush()?;
         }
         Ok(())
     }
 
-    fn cmd<S: AsRef<str>>(&self, cmd_path: &str, args: S) -> Result<()> {
-        self.output(format!("    # {} {}", cmd_path, args.as_ref()))?;
-        let args: Vec<&str> = args.as_ref().split_whitespace().collect::<Vec<_>>();
-        let result = Command::new(cmd_path)
-            .args(args)
-            .output()?;
-
-        if !result.status.success() {
-            match result.status.code() {
-                Some(code) => bail!("command {} failed with exit code: {}", cmd_path, code),
-                None => bail!("command {} failed with no exit code", cmd_path),
-            }
+    fn cmd_list<I: IntoIterator<Item=S>, S: AsRef<str>>(&self, cmd_lines: I, subs: &[(&str,&str)]) -> Result<()> {
+        for line in cmd_lines {
+            let line = line.as_ref();
+            let line = subs.iter().fold(line.to_string(), |acc, (from,to)| acc.replace(from,to));
+            let args: Vec<&str> = line.split_whitespace().collect::<Vec<_>>();
+            self.run_cmd(args, false)?;
         }
+        Ok(())
+    }
+
+    fn cmd<S: AsRef<str>>(&self, args: S) -> Result<()> {
+        let args: Vec<&str> = args.as_ref().split_whitespace().collect::<Vec<_>>();
+        self.run_cmd(args, false)
+    }
+
+    fn run_cmd(&self, args: Vec<&str>, as_user: bool) -> Result<()> {
+        self.output(format!("    # {}", args.join(" ")))?;
+
+        let mut command = Command::new(args[0]);
+
+        if as_user {
+            command.uid(1000);
+            command.gid(1000);
+        }
+
+        command.args(&args[1..]);
+
+        let result = command.output()?;
 
         for line in String::from_utf8_lossy(&result.stdout).lines() {
             self.output(format!("    {}", line))?;
@@ -565,6 +580,13 @@ impl Installer {
 
         for line in String::from_utf8_lossy(&result.stderr).lines() {
             self.output(format!("!   {}", line))?;
+        }
+
+        if !result.status.success() {
+            match result.status.code() {
+                Some(code) => bail!("command {} failed with exit code: {}", args[0], code),
+                None => bail!("command {} failed with no exit code", args[0]),
+            }
         }
         Ok(())
     }
