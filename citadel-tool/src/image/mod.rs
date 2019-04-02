@@ -3,7 +3,7 @@ use std::process::exit;
 
 use clap::{App,Arg,SubCommand,ArgMatches};
 use clap::AppSettings::*;
-use libcitadel::{Result,ResourceImage,Logger,LogLevel,format_error,Partition,KeyPair,ImageHeader,devkeys};
+use libcitadel::{Result,ResourceImage,Logger,LogLevel,format_error,Partition,KeyPair,ImageHeader};
 use std::fs;
 use hex;
 
@@ -270,9 +270,8 @@ fn rotate(path: &Path) -> Result<()> {
 }
 
 fn genkeys() -> Result<()> {
-    let keypair = KeyPair::generate()?;
-    println!("public-key = \"{}\"", keypair.public_key().to_hex());
-    println!("private-key = \"{}\"", keypair.private_key_hex());
+    let keypair = KeyPair::generate();
+    println!("keypair = \"{}\"", keypair.to_hex());
     Ok(())
 }
 
