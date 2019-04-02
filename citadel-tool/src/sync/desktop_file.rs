@@ -2,7 +2,8 @@ use std::io::Write;
 use std::fs::File;
 use std::path::Path;
 use std::collections::HashMap;
-use crate::Result;
+
+use libcitadel::Result;
 
 
 pub struct DesktopFile {
@@ -18,8 +19,7 @@ pub struct DesktopFile {
 impl DesktopFile {
 
     pub fn write_to_dir<P: AsRef<Path>>(&self, directory: P) -> Result<()> {
-        let mut path = directory.as_ref().to_path_buf();
-        path.push(self.filename.as_str());
+        let path = directory.as_ref().join(&self.filename);
         let f = File::create(&path)?;
         self.write_to(f)?;
         Ok(())
@@ -59,6 +59,10 @@ impl DesktopFile {
             return t == "Application"
         }
         false
+    }
+
+    pub fn icon(&self) -> Option<&str> {
+        self.get_key_val("Icon")
     }
 
     fn show_in_gnome(&self) -> bool {
@@ -105,7 +109,6 @@ impl DesktopFile {
         None
     }
 
-
     pub fn new(filename: &str) -> DesktopFile {
         DesktopFile {
             filename: filename.to_string(),
@@ -131,8 +134,6 @@ impl DesktopFile {
         }
         self.lines.push(line);
     }
-
-
 }
 
 

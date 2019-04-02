@@ -1,0 +1,9 @@
+[Unit]
+Description=Current realm directory watcher
+Before=launch-default-realm.service
+
+[Path]
+PathChanged=/run/citadel/realms/current
+
+[Install]
+WantedBy=multi-user.target

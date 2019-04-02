@@ -1,0 +1,7 @@
+[Unit]
+Description=Desktop Watcher
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/citadel-desktop-sync

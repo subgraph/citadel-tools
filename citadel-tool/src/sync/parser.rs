@@ -1,10 +1,10 @@
-
 use std::io::Read;
 use std::fs::File;
 use std::path::Path;
 use std::collections::HashSet;
-use crate::desktop::{DesktopFile,Line};
-use crate::Result;
+
+use libcitadel::Result;
+use crate::sync::desktop_file::{DesktopFile,Line};
 
 lazy_static! {
     // These are the keys which are copied into the translated .desktop files

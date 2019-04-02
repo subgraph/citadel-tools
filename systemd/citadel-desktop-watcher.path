@@ -1,0 +1,7 @@
+[Unit]
+Description=Desktop File Watcher
+StartLimitIntervalSec=0
+
+[Path]
+PathChanged=/run/citadel/realms/current/current.realm/rootfs/usr/share/applications
+PathChanged=/run/citadel/realms/current/current.realm/home/.local/share/applications

@@ -1,0 +1,8 @@
+[Unit]
+Description=Current Realm Directory Watcher
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/citadel-desktop-sync --clear
+ExecStart=/usr/bin/systemctl restart citadel-desktop-watcher.path
