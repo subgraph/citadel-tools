@@ -1,14 +1,15 @@
 use std::path::{Path,PathBuf};
-use std::process::{Command,ExitStatus,Stdio};
-use std::mem;
-use libc::{self, c_char};
-use std::ffi::CStr;
-use std::str::from_utf8_unchecked;
+use std::process::{Command,Stdio};
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::MetadataExt;
 use std::env;
-use std::fs::File;
-use std::io::{self,Seek,Read,BufReader,SeekFrom};
+use std::fs::{self,File};
+use std::ffi::CString;
+use std::io::{self, Seek, Read, BufReader, SeekFrom};
 
 use failure::ResultExt;
+use walkdir::WalkDir;
+use libc;
 
 use crate::Result;
 
@@ -56,55 +57,11 @@ pub fn ensure_command_exists(cmd: &str) -> Result<()> {
     Err(format_err!("Cannot execute '{}': command does not exist", cmd))
 }
 
-pub fn exec_cmdline<S: AsRef<str>>(cmd_path: &str, args: S) -> Result<()> {
-    ensure_command_exists(cmd_path)?;
-    let args: Vec<&str> = args.as_ref().split_whitespace().collect::<Vec<_>>();
-    let status = Command::new(cmd_path)
-        .args(args)
-        .stderr(Stdio::inherit())
-        .status()?;
-
-    check_cmd_status(cmd_path, &status)
-}
-
-pub fn exec_cmdline_quiet<S: AsRef<str>>(cmd_path: &str, args: S) -> Result<()> {
-    ensure_command_exists(cmd_path)?;
-    let args: Vec<&str> = args.as_ref().split_whitespace().collect::<Vec<_>>();
-    let status = Command::new(cmd_path)
-        .args(args)
-        .stderr(Stdio::null())
-        .stdout(Stdio::null())
-        .status()?;
-
-    check_cmd_status(cmd_path, &status)
-}
-
-pub fn exec_cmdline_with_output<S: AsRef<str>>(cmd_path: &str, args: S) -> Result<String> {
-    ensure_command_exists(cmd_path)?;
-    let args: Vec<&str> = args.as_ref().split_whitespace().collect::<Vec<_>>();
-    let res = Command::new(cmd_path)
-        .args(args)
-        .stderr(Stdio::inherit())
-        .output()
-        .context(format!("unable to execute {}", cmd_path))?;
-
-    check_cmd_status(cmd_path, &res.status)?;
-    Ok(String::from_utf8(res.stdout).unwrap().trim().to_owned())
-}
-
-fn check_cmd_status(cmd_path: &str, status: &ExitStatus) -> Result<()> {
-    if !status.success() {
-        match status.code() {
-            Some(code) => bail!("command {} failed with exit code: {}", cmd_path, code),
-            None => bail!("command {} failed with no exit code", cmd_path),
-        }
-    }
-    Ok(())
-}
 
 pub fn sha256<P: AsRef<Path>>(path: P) -> Result<String> {
-    let output = exec_cmdline_with_output("/usr/bin/sha256sum", format!("{}", path.as_ref().display()))
-        .context(format!("failed to calculate sha256 on {}", path.as_ref().display()))?;
+    let path = path.as_ref();
+    let output = cmd_with_output!("/usr/bin/256sum", "{}", path.display())
+        .context(format!("failed to calculate sha256 on {}", path.display()))?;
 
     let v: Vec<&str> = output.split_whitespace().collect();
     Ok(v[0].trim().to_owned())
@@ -158,71 +115,96 @@ pub fn exec_cmdline_pipe_input<S,P>(cmd_path: &str, args: S, input: P, range: Fi
 }
 
 pub fn xz_compress<P: AsRef<Path>>(path: P) -> Result<()> {
-    exec_cmdline("/usr/bin/xz", format!("-T0 {}", path.as_ref().display()))
-        .context(format!("failed to compress {}", path.as_ref().display()))?;
+    let path = path.as_ref();
+    cmd!("/usr/bin/xz", "-T0 {}", path.display())
+        .context(format!("failed to compress {}", path.display()))?;
     Ok(())
 }
 
 pub fn xz_decompress<P: AsRef<Path>>(path: P) -> Result<()> {
-    exec_cmdline("/usr/bin/xz", format!("-d {}", path.as_ref().display()))
-        .context(format!("failed to decompress {}", path.as_ref().display()))?;
+    let path = path.as_ref();
+    cmd!("/usr/bin/xz", "-d {}", path.display())
+        .context(format!("failed to decompress {}", path.display()))?;
     Ok(())
 }
 
-pub fn mount<P: AsRef<Path>>(source: &str, target: P, options: Option<&str>) -> Result<()> {
-    let paths = format!("{} {}", source, target.as_ref().display());
-    let args = match options {
-        Some(s) => format!("{} {}", s, paths),
-        None => paths,
-    };
-    exec_cmdline("/usr/bin/mount", args)
+pub fn mount<P: AsRef<Path>>(source: impl AsRef<str>, target: P, options: Option<&str>) -> Result<()> {
+    let source = source.as_ref();
+    let target = target.as_ref();
+    if let Some(options) = options {
+        cmd!("/usr/bin/mount", "{} {} {}", options, source, target.display())
+    } else {
+        cmd!("/usr/bin/mount", "{} {}", source, target.display())
+    }
 }
 
 pub fn umount<P: AsRef<Path>>(path: P) -> Result<()> {
-    let args = format!("{}", path.as_ref().display());
-    exec_cmdline("/usr/bin/umount", args)
+    let path = path.as_ref();
+    cmd!("/usr/bin/umount", "{}", path.display())
 }
 
-
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct UtsName(libc::utsname);
-
-#[allow(dead_code)]
-impl UtsName {
-    pub fn sysname(&self) -> &str {
-        to_str(&(&self.0.sysname as *const c_char ) as *const *const c_char)
-    }
-
-    pub fn nodename(&self) -> &str {
-        to_str(&(&self.0.nodename as *const c_char ) as *const *const c_char)
-    }
-
-    pub fn release(&self) -> &str {
-        to_str(&(&self.0.release as *const c_char ) as *const *const c_char)
-    }
-
-    pub fn version(&self) -> &str {
-        to_str(&(&self.0.version as *const c_char ) as *const *const c_char)
-    }
-
-    pub fn machine(&self) -> &str {
-        to_str(&(&self.0.machine as *const c_char ) as *const *const c_char)
-    }
+pub fn chown_user<P: AsRef<Path>>(path: P) -> io::Result<()> {
+    chown(path.as_ref(), 1000, 1000)
 }
 
-pub fn uname() -> UtsName {
+pub fn chown(path: &Path, uid: u32, gid: u32) -> io::Result<()> {
+    let cstr = CString::new(path.as_os_str().as_bytes())?;
     unsafe {
-        let mut ret: UtsName = mem::uninitialized();
-        libc::uname(&mut ret.0);
-        ret
+        if libc::chown(cstr.as_ptr(), uid, gid) == -1 {
+            return Err(io::Error::last_os_error());
+        }
     }
+    Ok(())
 }
 
-#[inline]
-fn to_str<'a>(s: *const *const c_char) -> &'a str {
-    unsafe {
-        let res = CStr::from_ptr(*s).to_bytes();
-        from_utf8_unchecked(res)
+fn copy_path(from: &Path, to: &Path, chown_to: Option<(u32,u32)>) -> Result<()> {
+    if to.exists() {
+        bail!("destination path {} already exists which is not expected", to.display());
     }
+
+    let meta = from.metadata()?;
+
+    if from.is_dir() {
+        fs::create_dir(to)?;
+    } else {
+        fs::copy(&from, &to)?;
+    }
+
+    if let Some((uid,gid)) = chown_to {
+        chown(to, uid, gid)?;
+    } else {
+        chown(to, meta.uid(), meta.gid())?;
+    }
+    Ok(())
+
+}
+
+pub fn copy_tree(from_base: &Path, to_base: &Path) -> Result<()> {
+    _copy_tree(from_base, to_base, None)
+}
+
+pub fn copy_tree_with_chown(from_base: &Path, to_base: &Path, chown_to: (u32,u32)) -> Result<()> {
+    _copy_tree(from_base, to_base, Some(chown_to))
+}
+
+fn _copy_tree(from_base: &Path, to_base: &Path, chown_to: Option<(u32,u32)>) -> Result<()> {
+    for entry in WalkDir::new(from_base) {
+        let path = entry?.path().to_owned();
+        let to = to_base.join(path.strip_prefix(from_base)?);
+        if &to != to_base {
+            copy_path(&path, &to, chown_to)
+                .map_err(|e| format_err!("failed to copy {} to {}: {}", path.display(), to.display(), e))?;
+        }
+    }
+    Ok(())
+}
+
+pub fn chown_tree(base: &Path, chown_to: (u32,u32), include_base: bool) -> Result<()> {
+    for entry in WalkDir::new(base) {
+        let entry = entry?;
+        if entry.path() != base || include_base {
+            chown(entry.path(), chown_to.0, chown_to.1)?;
+        }
+    }
+    Ok(())
 }
