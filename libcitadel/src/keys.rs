@@ -50,8 +50,12 @@ impl KeyPair {
 
     pub fn from_hex(hex: &str) -> Result<KeyPair> {
         let bytes = hex::decode(hex)?;
+        KeyPair::from_bytes(&bytes)
+    }
+
+    pub fn from_bytes(bytes: &[u8]) -> Result<KeyPair> {
         if bytes.len() != SEEDBYTES {
-           bail!("Hex encoded keypair has incorrect length");
+            bail!("Hex encoded keypair has incorrect length");
         }
         let seed = sign::Seed::from_slice(&bytes).expect("Seed::from_slice() failed");
         Ok(KeyPair(seed))
