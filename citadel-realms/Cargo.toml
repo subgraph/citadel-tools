@@ -5,14 +5,18 @@ authors = ["Bruce Leidl <bruce@subgraph.com>"]
 homepage = "http://github.com/subgraph/citadel"
 edition = "2018"
 
+
 [dependencies]
 libcitadel = { path = "../libcitadel" }
 libc = "0.2"
-clap = "2.30.0"
 failure = "0.1.1"
-toml = "0.4.5"
-serde_derive = "1.0.27"
-serde = "1.0.27"
-termcolor = "0.3"
-walkdir = "2"
-lazy_static = "1.2.0"
+termion = "1.5.1"
+signal-hook = "0.1.7"
+
+[dependencies.cursive]
+version = "=0.11.0"
+default-features = false
+features = [ "termion-backend" ]
+
+[dependencies.crossbeam-channel]
+version = "0.3"
