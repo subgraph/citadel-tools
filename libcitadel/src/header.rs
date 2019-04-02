@@ -1,14 +1,14 @@
-use std::cell::RefCell;
 use std::fs::{File,OpenOptions};
 use std::io::{Read, Write};
 use std::path::Path;
-
-use failure::ResultExt;
 
 use toml;
 
 use crate::blockdev::AlignedBuffer;
 use crate::{BlockDev,Result,public_key_for_channel,PublicKey};
+use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::atomic::{Ordering,AtomicIsize};
+use std::os::unix::fs::MetadataExt;
 
 /// Expected magic value in header
 const MAGIC: &[u8] = b"SGOS";
@@ -58,9 +58,74 @@ fn is_valid_status_code(code: u8) -> bool {
 /// signature : ed25519 signature over the bytes of the metainfo field
 ///
 
-#[derive(Clone)]
-pub struct ImageHeader(RefCell<Vec<u8>>);
+pub struct ImageHeader {
+    buffer: RwLock<HeaderBytes>,
+    metainfo: Mutex<Option<Arc<MetaInfo>>>,
+    timestamp: AtomicIsize,
+}
 
+struct HeaderBytes([u8; ImageHeader::HEADER_SIZE]);
+
+impl HeaderBytes {
+
+    fn create_empty() -> RwLock<Self> {
+        let mut buffer = HeaderBytes::new();
+        buffer.clear();
+        RwLock::new(buffer)
+    }
+
+    fn create_from_slice(slice: &[u8]) -> RwLock<Self> {
+        assert_eq!(slice.len(), ImageHeader::HEADER_SIZE);
+        let mut buffer = HeaderBytes::new();
+        buffer.0.copy_from_slice(slice);
+        RwLock::new(buffer)
+    }
+
+    fn new() -> Self {
+        HeaderBytes([0u8; ImageHeader::HEADER_SIZE])
+    }
+
+    fn clear(&mut self) {
+        for b in &mut self.0[..] {
+            *b = 0;
+        }
+        self.write_bytes(0, MAGIC);
+    }
+
+    fn read_u8(&self, idx: usize) -> u8 {
+        self.0[idx]
+    }
+
+    fn write_u8(&mut self, idx: usize, val: u8) {
+        self.0[idx] = val;
+    }
+
+    fn read_u16(&self, idx: usize) -> u16 {
+        let hi = self.read_u8(idx) as u16;
+        let lo = self.read_u8(idx + 1) as u16;
+        (hi << 8) | lo
+    }
+
+    fn write_u16(&mut self, idx: usize, val: u16) {
+        let hi = (val >> 8) as u8;
+        let lo = val as u8;
+        self.write_u8(idx, hi);
+        self.write_u8(idx + 1, lo);
+    }
+
+    fn set_metainfo_len(&mut self, len: usize) {
+        self.write_u16(6, len as u16);
+    }
+
+    fn write_bytes(&mut self, offset: usize, data: &[u8]) {
+        self.0[offset..offset + data.len()].copy_from_slice(data)
+    }
+
+    fn read_bytes(&self, offset: usize, len: usize) -> Vec<u8> {
+        Vec::from(&self.0[offset..offset + len])
+    }
+
+}
 const CODE_TO_LABEL: [&str; 7] = [
     "Invalid",
     "New",
@@ -88,22 +153,69 @@ impl ImageHeader {
     pub const HEADER_SIZE: usize = 4096;
 
     pub fn new() -> ImageHeader {
-        let v = vec![0u8; ImageHeader::HEADER_SIZE];
-        let header = ImageHeader(RefCell::new(v));
-        header.write_bytes(0, MAGIC);
-        header
+        let metainfo = Mutex::new(None);
+        let buffer = HeaderBytes::create_empty();
+        let timestamp = AtomicIsize::new(0);
+        ImageHeader { buffer, metainfo, timestamp }
+    }
+
+    /// Reload header if file has changed on disk
+    pub fn reload_if_stale<P: AsRef<Path>>(&self, path: P) -> Result<bool> {
+        let path = path.as_ref();
+        let reload = self.is_stale(path)?;
+        if reload {
+            self.reload_file(path)?;
+        }
+        Ok(reload)
+    }
+
+    fn is_stale(&self, path: &Path) -> Result<bool> {
+        let (_,ts) = Self::file_metadata(path)?;
+        let stale = self.timestamp.swap(ts, Ordering::SeqCst) != ts;
+        Ok(stale)
+    }
+
+    fn reload_file(&self, path: &Path) -> Result<()> {
+        let header = Self::from_file(path)?;
+        let header_lock = header.metainfo.lock().unwrap();
+        let mut lock = self.metainfo.lock().unwrap();
+        self.bytes_mut().0.copy_from_slice(&header.bytes().0);
+        *lock = (*header_lock).clone();
+        Ok(())
     }
 
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<ImageHeader> {
-        // XXX check file size is at least HEADER_SIZE
-        let mut f = File::open(path.as_ref())?;
-        ImageHeader::from_reader(&mut f)
+        let path = path.as_ref();
+        let (size,ts) = Self::file_metadata(path)?;
+        if size < Self::HEADER_SIZE {
+            bail!("Cannot load image header because {} has a size of {}", path.display(), size);
+        }
+        let mut f = File::open(path)?;
+        let mut header = ImageHeader::from_reader(&mut f)?;
+        *header.timestamp.get_mut() = ts;
+        Ok(header)
+    }
+
+    // returns tuple of (size,mtime)
+    fn file_metadata(path: &Path) -> Result<(usize, isize)> {
+        let metadata = path.metadata()?;
+        Ok((metadata.len() as usize, metadata.mtime() as isize))
     }
 
     pub fn from_reader<R: Read>(r: &mut R) -> Result<ImageHeader> {
         let mut v = vec![0u8; ImageHeader::HEADER_SIZE];
         r.read_exact(&mut v)?;
-        Ok(ImageHeader(RefCell::new(v)))
+        Self::from_slice(&v)
+    }
+
+    fn from_slice(slice: &[u8]) -> Result<ImageHeader> {
+        assert_eq!(slice.len(), ImageHeader::HEADER_SIZE);
+        let buffer = HeaderBytes::create_from_slice(slice);
+        let metainfo = Mutex::new(None);
+        let timestamp = AtomicIsize::new(0);
+        let header = ImageHeader { buffer, metainfo, timestamp };
+        header.load_metainfo_if_magic_valid()?;
+        Ok(header)
     }
 
     pub fn from_partition<P: AsRef<Path>>(path: P) -> Result<ImageHeader> {
@@ -117,8 +229,7 @@ impl ImageHeader {
         );
         let mut buffer = AlignedBuffer::new(ImageHeader::HEADER_SIZE);
         dev.read_sectors(nsectors - 8, buffer.as_mut())?;
-        let header = ImageHeader(RefCell::new(buffer.as_ref().into()));
-        Ok(header)
+        Self::from_slice(buffer.as_ref())
     }
 
     pub fn write_partition<P: AsRef<Path>>(&self, path: P) -> Result<()> {
@@ -130,24 +241,53 @@ impl ImageHeader {
             path.as_ref().display(),
             nsectors
         );
-        let buffer = AlignedBuffer::from_slice(&self.0.borrow());
+        let lock = self.bytes();
+        let buffer = AlignedBuffer::from_slice(&lock.0);
         dev.write_sectors(nsectors - 8, buffer.as_ref())?;
         Ok(())
     }
 
-    pub fn metainfo(&self) -> Result<MetaInfo> {
-        let mlen = self.metainfo_len();
-        if mlen == 0 || mlen > MAX_METAINFO_LEN {
-            bail!("Invalid metainfo-len field: {}", mlen);
+
+    fn bytes(&self) -> RwLockReadGuard<HeaderBytes> {
+        self.buffer.read().unwrap()
+    }
+
+    fn bytes_mut(&self) -> RwLockWriteGuard<HeaderBytes> {
+        self.buffer.write().unwrap()
+    }
+
+    fn with_bytes<F,R>(&self, f: F) -> R
+        where F: FnOnce(&HeaderBytes) -> R
+    {
+        f(&self.bytes())
+    }
+
+    fn with_bytes_mut<F,R>(&self, f: F) -> R
+        where F: FnOnce(&mut HeaderBytes) -> R
+    {
+        f(&mut self.bytes_mut())
+    }
+
+    fn load_metainfo_if_magic_valid(&self) -> Result<()> {
+        if !self.is_magic_valid() {
+            return Ok(())
         }
-        let mbytes = self.metainfo_bytes();
-        let mut metainfo = MetaInfo::new(mbytes);
-        metainfo.parse_toml()?;
-        Ok(metainfo)
+
+        let mut lock = self.metainfo.lock().unwrap();
+        let mb = self.metainfo_bytes();
+        let metainfo = MetaInfo::parse_bytes(&mb)
+            .ok_or(format_err!("ImageHeader has invalid metainfo"))?;
+        *lock = Some(Arc::new(metainfo));
+        Ok(())
+    }
+
+    pub fn metainfo(&self) -> Arc<MetaInfo> {
+        let lock = self.metainfo.lock().unwrap();
+        lock.as_ref().expect("Header has no metainfo set").clone()
     }
 
     pub fn is_magic_valid(&self) -> bool {
-        self.read_bytes(0, 4) == MAGIC
+        self.with_bytes(|bs| bs.read_bytes(0,4) == MAGIC)
     }
 
     pub fn status(&self) -> u8 {
@@ -196,19 +336,28 @@ impl ImageHeader {
         self.read_u16(6) as usize
     }
 
-    pub fn set_metainfo_len(&self, len: usize) {
-        self.write_u16(6, len as u16);
-    }
+    pub fn set_metainfo_bytes(&self, bytes: &[u8]) -> Result<()> {
+        let metainfo = MetaInfo::parse_bytes(bytes)
+            .ok_or(format_err!("Could not parse metainfo bytes as valid metainfo document"))?;
 
-    pub fn set_metainfo_bytes(&self, bytes: &[u8]) {
-        self.set_metainfo_len(bytes.len());
-        self.write_bytes(8, bytes);
+        let mut lock = self.metainfo.lock().unwrap();
+        self.with_bytes_mut(|bs| {
+            bs.0.iter_mut().skip(8).for_each(|b| *b = 0);
+            bs.set_metainfo_len(bytes.len());
+            bs.write_bytes(8,bytes);
+        });
+        *lock = Some(Arc::new(metainfo));
+        Ok(())
     }
 
     pub fn metainfo_bytes(&self) -> Vec<u8> {
         let mlen = self.metainfo_len();
         assert!(mlen > 0 && mlen < MAX_METAINFO_LEN);
         self.read_bytes(METAINFO_OFFSET, mlen)
+    }
+
+    pub fn has_signature(&self) -> bool {
+        self.signature().iter().any(|b| *b != 0)
     }
 
     pub fn signature(&self) -> Vec<u8> {
@@ -232,8 +381,7 @@ impl ImageHeader {
     }
 
     pub fn public_key(&self) -> Result<Option<PublicKey>> {
-        let metainfo = self.metainfo()?;
-        public_key_for_channel(metainfo.channel())
+        public_key_for_channel(self.metainfo().channel())
     }
 
     pub fn verify_signature(&self, pubkey: PublicKey) -> bool {
@@ -241,7 +389,7 @@ impl ImageHeader {
     }
 
     pub fn write_header<W: Write>(&self, mut writer: W) -> Result<()> {
-        writer.write_all(&self.0.borrow())?;
+        self.with_bytes(|bs| writer.write_all(&bs.0))?;
         Ok(())
     }
 
@@ -249,52 +397,30 @@ impl ImageHeader {
         self.write_header(OpenOptions::new().write(true).open(path.as_ref())?)
     }
 
-    pub fn clear(&self) {
-        for b in &mut self.0.borrow_mut()[..] {
-            *b = 0;
-        }
-        self.write_bytes(0, MAGIC);
-    }
-
     fn read_u8(&self, idx: usize) -> u8 {
-        self.0.borrow()[idx]
-    }
-
-    fn read_u16(&self, idx: usize) -> u16 {
-        let hi = self.read_u8(idx) as u16;
-        let lo = self.read_u8(idx + 1) as u16;
-        (hi << 8) | lo
+        self.with_bytes(|bs| bs.read_u8(idx))
     }
 
     fn write_u8(&self, idx: usize, val: u8) {
-        self.0.borrow_mut()[idx] = val;
+        self.with_bytes_mut(|bs| bs.write_u8(idx, val))
     }
 
-    fn write_u16(&self, idx: usize, val: u16) {
-        let hi = (val >> 8) as u8;
-        let lo = val as u8;
-        self.write_u8(idx, hi);
-        self.write_u8(idx + 1, lo);
+    fn read_u16(&self, idx: usize) -> u16 {
+        self.with_bytes(|bs| bs.read_u16(idx))
     }
 
     fn write_bytes(&self, offset: usize, data: &[u8]) {
-        self.0.borrow_mut()[offset..offset + data.len()].copy_from_slice(data)
+        self.with_bytes_mut(|bs| bs.write_bytes(offset, data))
     }
 
     fn read_bytes(&self, offset: usize, len: usize) -> Vec<u8> {
-        Vec::from(&self.0.borrow()[offset..offset + len])
+        self.with_bytes(|bs| bs.read_bytes(offset, len))
     }
 }
 
-#[derive(Clone)]
-pub struct MetaInfo {
-    bytes: Vec<u8>,
-    is_parsed: bool,
-    toml: Option<MetaInfoToml>,
-}
 
-#[derive(Deserialize, Serialize, Clone)]
-struct MetaInfoToml {
+#[derive(Deserialize, Serialize, Clone, Default)]
+pub struct MetaInfo {
     #[serde(rename = "image-type")]
     image_type: String,
 
@@ -333,64 +459,68 @@ struct MetaInfoToml {
 }
 
 impl MetaInfo {
-    fn new(bytes: Vec<u8>) -> MetaInfo {
-        MetaInfo {
-            bytes,
-            is_parsed: false,
-            toml: None,
-        }
-    }
 
-    pub fn parse_toml(&mut self) -> Result<()> {
-        if !self.is_parsed {
-            self.is_parsed = true;
-            let toml =
-                toml::from_slice::<MetaInfoToml>(&self.bytes).context("parsing header metainfo")?;
-            self.toml = Some(toml);
-        }
-        Ok(())
-    }
-
-    fn toml(&self) -> &MetaInfoToml {
-        self.toml.as_ref().unwrap()
+    fn parse_bytes(bytes: &[u8]) -> Option<MetaInfo> {
+        toml::from_slice::<MetaInfo>(bytes).ok()
     }
 
     pub fn image_type(&self) -> &str {
-        self.toml().image_type.as_str()
+        self.image_type.as_str()
     }
 
     pub fn channel(&self) -> &str {
-        self.toml().channel.as_str()
+        self.channel.as_str()
     }
 
-    pub fn kernel_version(&self) -> Option<&str> { self.toml().kernel_version.as_ref().map(|s| s.as_str()) }
+    fn str_ref(arg: &Option<String>) -> Option<&str> {
+        match arg {
+            Some(ref s) => Some(s.as_str()),
+            None => None,
+        }
+    }
 
-    pub fn kernel_id(&self) -> Option<&str> { self.toml().kernel_id.as_ref().map(|s| s.as_str()) }
+    pub fn kernel_version(&self) -> Option<&str> {
+        Self::str_ref(&self.kernel_version)
+    }
 
-    pub fn realmfs_name(&self) -> Option<&str> { self.toml().realmfs_name.as_ref().map(|s| s.as_str()) }
-    pub fn realmfs_owner(&self) -> Option<&str> { self.toml().realmfs_owner.as_ref().map(|s| s.as_str()) }
+    pub fn kernel_id(&self) -> Option<&str> {
+        Self::str_ref(&self.kernel_id)
+    }
+
+    pub fn realmfs_name(&self) -> Option<&str> {
+        Self::str_ref(&self.realmfs_name)
+    }
+
+    pub fn realmfs_owner(&self) -> Option<&str> {
+        Self::str_ref(&self.realmfs_owner)
+    }
 
     pub fn version(&self) -> u32 {
-        self.toml().version
+        self.version
     }
 
     pub fn timestamp(&self) -> &str {
-        &self.toml().timestamp
+        &self.timestamp
     }
 
     pub fn nblocks(&self) -> usize {
-        self.toml().nblocks as usize
+        self.nblocks as usize
     }
 
     pub fn shasum(&self) -> &str {
-        &self.toml().shasum
+        &self.shasum
     }
 
     pub fn verity_root(&self) -> &str {
-        &self.toml().verity_root
+        &self.verity_root
     }
 
     pub fn verity_salt(&self) -> &str {
-        &self.toml().verity_salt
+        &self.verity_salt
+    }
+
+    pub fn verity_tag(&self) -> String {
+        self.verity_root().chars().take(8).collect()
     }
 }
+
