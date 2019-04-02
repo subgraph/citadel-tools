@@ -119,7 +119,6 @@ impl ItemListContent<Realm> for RealmListContent {
             Event::Char('$') => RealmAction::open_shell(false),
             Event::Char('#') => RealmAction::open_shell(true),
             Event::Char('u') => RealmAction::update_realmfs(),
-            Event::Char('x') => RealmAction::stop_events(),
             Event::Char('.') => {
                 self.show_system_realms = !self.show_system_realms;
                 EventResult::with_cb(|s| ItemList::<Realm>::call_reload("realms", s))

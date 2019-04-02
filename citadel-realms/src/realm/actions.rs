@@ -74,14 +74,6 @@ impl RealmAction {
         })
     }
 
-    // XXX
-    pub fn stop_events() -> EventResult {
-        Self::action(|r| {
-            let manager = r.manager();
-            manager.stop_event_task();
-        })
-    }
-
     pub fn open_terminal() -> EventResult {
         let title = "Open Terminal?";
         let msg = "Open terminal in realm '$REALM'?";
