@@ -1,117 +1,118 @@
 use std::path::{Path,PathBuf};
 use std::collections::HashMap;
-use std::process::{Command, Stdio};
 use std::fs::{self, OpenOptions,File};
 use std::io;
 
-use failure::ResultExt;
-use crate::{Result,MetaInfo,Partition,util};
+use crate::{Result, MetaInfo, Partition, LoopDevice, Mountpoint};
 
-const VERITYSETUP: &str = "/sbin/veritysetup";
-const LOSETUP: &str = "/sbin/losetup";
 
-/// Generate dm-verity hashtree for a disk image and store in external file.
-/// Parse output from veritysetup command and return as `VerityOutput`.
-pub fn generate_initial_hashtree<P: AsRef<Path>, Q:AsRef<Path>>(source: P, hashtree: Q) -> Result<VerityOutput> {
-    let args = format!("format {} {}", source.as_ref().display(), hashtree.as_ref().display());
-    // Don't use absolute path to veritysetup so that the build will correctly find the version from cryptsetup-native
-    let output = util::exec_cmdline_with_output("veritysetup", args)
-        .context("creating initial hashtree with veritysetup format failed")?;
-    Ok(VerityOutput::parse(&output))
+pub struct Verity {
+    image: PathBuf,
 }
 
-pub fn generate_image_hashtree<P: AsRef<Path>>(image: P, metainfo: &MetaInfo) -> Result<VerityOutput> {
-    let verityfile = image.as_ref().with_extension("verity");
+impl Verity {
+    const VERITYSETUP: &'static str = "/sbin/veritysetup";
 
-    // Make sure file size is correct or else verity tree will be appended in wrong place
-    let meta = image.as_ref().metadata()?;
-    let len = meta.len() as usize;
-    let expected = (metainfo.nblocks() + 1) * 4096;
-    if len != expected {
-        bail!("Actual file size ({}) does not match expected size ({})", len, expected);
+    pub fn new(image: impl AsRef<Path>) -> Self {
+        let image = image.as_ref().to_path_buf();
+        Verity { image }
     }
 
-    let vout = with_loopdev(image.as_ref(), |loopdev| {
-        let args = format!("--data-blocks={} --salt={} format {} {}",
-                           metainfo.nblocks(), metainfo.verity_salt(),
-                           loopdev, verityfile.display());
-
-        let output = util::exec_cmdline_with_output(VERITYSETUP, args)?;
+    pub fn generate_initial_hashtree(&self, output: impl AsRef<Path>) -> Result<VerityOutput> {
+        let output = output.as_ref();
+        // Don't use absolute path to veritysetup so that the build will correctly find the version from cryptsetup-native
+        let output = cmd_with_output!("veritysetup", "format {} {}", self.path_str(), output.display())?;
         Ok(VerityOutput::parse(&output))
-    })?;
+    }
 
-    let mut input = File::open(&verityfile)?;
-    let mut output = OpenOptions::new().append(true).open(image.as_ref())?;
-    io::copy(&mut input, &mut output)?;
-    fs::remove_file(&verityfile)?;
+    pub fn generate_image_hashtree(&self, metainfo: &MetaInfo) -> Result<VerityOutput> {
+        let verity_salt = metainfo.verity_salt();
+        self.generate_image_hashtree_with_salt(metainfo, verity_salt)
+    }
 
-    Ok(vout)
-}
+    pub fn generate_image_hashtree_with_salt(&self, metainfo: &MetaInfo, salt: &str) -> Result<VerityOutput> {
 
-pub fn verify_image<P: AsRef<Path>>(image: P, metainfo: &MetaInfo) -> Result<bool> {
-    with_loopdev(image.as_ref(), |loopdev| {
-        let status = Command::new(VERITYSETUP)
-            .arg(format!("--hash-offset={}", metainfo.nblocks() * 4096))
-            .arg("verify")
-            .arg(&loopdev)
-            .arg(&loopdev)
-            .arg(metainfo.verity_root())
-            .stderr(Stdio::inherit())
-            .status()?;
-        Ok(status.success())
-    })
-}
+        let verityfile = self.image.with_extension("verity");
+        let nblocks = metainfo.nblocks();
 
+        // Make sure file size is correct or else verity tree will be appended in wrong place
+        let meta = self.image.metadata()?;
+        let len = meta.len() as usize;
+        let expected = (nblocks + 1) * 4096;
+        if len != expected {
+            bail!("Actual file size ({}) does not match expected size ({})", len, expected);
+        }
+        let vout = LoopDevice::with_loop(self.path(), Some(4096), true, |loopdev| {
+            let output = cmd_with_output!(Self::VERITYSETUP, "--data-blocks={} --salt={} format {} {}",
+                nblocks, salt, loopdev, verityfile.display())?;
+            Ok(VerityOutput::parse(&output))
+        })?;
+        let mut input = File::open(&verityfile)?;
+        let mut output = OpenOptions::new().append(true).open(self.path())?;
+        io::copy(&mut input, &mut output)?;
+        fs::remove_file(&verityfile)?;
+        Ok(vout)
+    }
 
+    pub fn verify(&self, metainfo: &MetaInfo) -> Result<bool> {
+        LoopDevice::with_loop(self.path(), Some(4096), true, |loopdev| {
+            cmd_ok!(Self::VERITYSETUP, "--hash-offset={} verify {} {} {}",
+            metainfo.nblocks() * 4096,
+            loopdev, loopdev, metainfo.verity_root())
+        })
+    }
 
-pub fn setup_image_device<P: AsRef<Path>>(image: P, metainfo: &MetaInfo) -> Result<PathBuf> {
-    let devname = if metainfo.image_type() == "rootfs" {
-        String::from("rootfs")
-    } else if metainfo.image_type() == "realmfs" {
-        let name = metainfo.realmfs_name()
-            .ok_or(format_err!("Cannot set up dm-verity on a realmfs '{}' because it has no name field in metainfo",
-                 image.as_ref().display()))?;
-        format!("verity-realmfs-{}", name)
-    } else {
-        format!("verity-{}", metainfo.image_type())
-    };
+    pub fn setup(&self, metainfo: &MetaInfo) -> Result<String> {
+        LoopDevice::with_loop(self.path(), Some(4096), true, |loopdev| {
+            let devname = Self::device_name(metainfo);
+            let srcdev = loopdev.to_string();
+            Self::setup_device(&srcdev, &devname, metainfo)?;
+            Ok(devname)
+        })
+    }
 
-    with_loopdev(image.as_ref(), |loopdev| {
-        setup_device(&loopdev, &devname, metainfo.nblocks(), metainfo.verity_root())
-    })
-}
+    pub fn setup_partition(partition: &Partition) -> Result<()> {
+        let metainfo = partition.header().metainfo();
+        let srcdev = partition.path().to_str().unwrap();
+        Self::setup_device(srcdev, "rootfs", &metainfo)
+    }
 
-fn with_loopdev<F,R>(image: &Path, f: F) -> Result<R>
-    where F: FnOnce(&str) -> Result<R>
-{
-    let loopdev = create_image_loop_device(image.as_ref())?;
-    let result = f(&loopdev);
-    let result_losetup = util::exec_cmdline(LOSETUP, format!("-d {}", loopdev));
-    let r = result?;
-    result_losetup.context("Error removing loop device created to generate verity tree")?;
-    Ok(r)
-}
+    pub fn close_device(device_name: &str) -> Result<()> {
+        info!("Removing verity device {}", device_name);
+        cmd!(Self::VERITYSETUP, "close {}", device_name)
+    }
 
+    pub fn device_name(metainfo: &MetaInfo) -> String {
+        if metainfo.image_type() == "rootfs" {
+            String::from("rootfs")
+        } else if metainfo.image_type() == "realmfs" {
+            let name = metainfo.realmfs_name().unwrap_or("unknown");
+            format!("verity-realmfs-{}-{}", name, metainfo.verity_tag())
+        } else {
+            format!("verity-{}", metainfo.image_type())
+        }
+    }
 
-pub fn setup_partition_device(partition: &Partition) -> Result<PathBuf> {
-    let metainfo = partition.header().metainfo()?;
-    let srcdev = partition.path().to_str().unwrap();
-    setup_device(srcdev, "rootfs", metainfo.nblocks(), metainfo.verity_root())
-}
+    pub fn device_name_for_mountpoint(mountpoint: &Mountpoint) -> String {
+        format!("verity-realmfs-{}-{}", mountpoint.realmfs(), mountpoint.tag())
+    }
 
-fn setup_device(srcdev: &str, devname: &str, nblocks: usize, roothash: &str) -> Result<PathBuf> {
-    let args = format!("--hash-offset={} --data-blocks={} create {} {} {} {}",
-                       nblocks * 4096, nblocks, devname, srcdev, srcdev, roothash);
-    util::exec_cmdline(VERITYSETUP, args)
-        .context("Failed to set up verity device")?;
+    fn setup_device(srcdev: &str, devname: &str, metainfo: &MetaInfo) -> Result<()> {
+        let nblocks = metainfo.nblocks();
+        let verity_root = metainfo.verity_root();
+        cmd!(Self::VERITYSETUP, "--hash-offset={} --data-blocks={} create {} {} {} {}",
+            nblocks * 4096, nblocks, devname, srcdev, srcdev, verity_root)?;
 
-    Ok(PathBuf::from(format!("/dev/mapper/{}", devname)))
-}
+        Ok(())
+    }
 
-fn create_image_loop_device(file: &Path) -> Result<String> {
-    let args = format!("--offset 4096 --read-only -f --show {}", file.display());
-    let output = util::exec_cmdline_with_output(LOSETUP, args)?;
-    Ok(output)
+    fn path(&self) -> &Path {
+        &self.image
+    }
+
+    fn path_str(&self) -> &str {
+        self.image.to_str().unwrap()
+    }
 }
 
 /// The output from the `veritysetup format` command can be parsed as key/value
