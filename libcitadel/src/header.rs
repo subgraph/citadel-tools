@@ -101,8 +101,8 @@ impl HeaderBytes {
     }
 
     fn read_u16(&self, idx: usize) -> u16 {
-        let hi = self.read_u8(idx) as u16;
-        let lo = self.read_u8(idx + 1) as u16;
+        let hi = u16::from(self.read_u8(idx));
+        let lo = u16::from(self.read_u8(idx + 1));
         (hi << 8) | lo
     }
 
@@ -152,11 +152,8 @@ impl ImageHeader {
     /// Size of header block
     pub const HEADER_SIZE: usize = 4096;
 
-    pub fn new() -> ImageHeader {
-        let metainfo = Mutex::new(None);
-        let buffer = HeaderBytes::create_empty();
-        let timestamp = AtomicIsize::new(0);
-        ImageHeader { buffer, metainfo, timestamp }
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Reload header if file has changed on disk
@@ -184,14 +181,14 @@ impl ImageHeader {
         Ok(())
     }
 
-    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<ImageHeader> {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path = path.as_ref();
         let (size,ts) = Self::file_metadata(path)?;
         if size < Self::HEADER_SIZE {
             bail!("Cannot load image header because {} has a size of {}", path.display(), size);
         }
         let mut f = File::open(path)?;
-        let mut header = ImageHeader::from_reader(&mut f)?;
+        let mut header = Self::from_reader(&mut f)?;
         *header.timestamp.get_mut() = ts;
         Ok(header)
     }
@@ -202,14 +199,14 @@ impl ImageHeader {
         Ok((metadata.len() as usize, metadata.mtime() as isize))
     }
 
-    pub fn from_reader<R: Read>(r: &mut R) -> Result<ImageHeader> {
-        let mut v = vec![0u8; ImageHeader::HEADER_SIZE];
+    pub fn from_reader<R: Read>(r: &mut R) -> Result<Self> {
+        let mut v = vec![0u8; Self::HEADER_SIZE];
         r.read_exact(&mut v)?;
         Self::from_slice(&v)
     }
 
-    fn from_slice(slice: &[u8]) -> Result<ImageHeader> {
-        assert_eq!(slice.len(), ImageHeader::HEADER_SIZE);
+    fn from_slice(slice: &[u8]) -> Result<Self> {
+        assert_eq!(slice.len(), Self::HEADER_SIZE);
         let buffer = HeaderBytes::create_from_slice(slice);
         let metainfo = Mutex::new(None);
         let timestamp = AtomicIsize::new(0);
@@ -218,7 +215,7 @@ impl ImageHeader {
         Ok(header)
     }
 
-    pub fn from_partition<P: AsRef<Path>>(path: P) -> Result<ImageHeader> {
+    pub fn from_partition<P: AsRef<Path>>(path: P) -> Result<Self> {
         let mut dev = BlockDev::open_ro(path.as_ref())?;
         let nsectors = dev.nsectors()?;
         ensure!(
@@ -227,7 +224,7 @@ impl ImageHeader {
             path.as_ref().display(),
             nsectors
         );
-        let mut buffer = AlignedBuffer::new(ImageHeader::HEADER_SIZE);
+        let mut buffer = AlignedBuffer::new(Self::HEADER_SIZE);
         dev.read_sectors(nsectors - 8, buffer.as_mut())?;
         Self::from_slice(buffer.as_ref())
     }
@@ -276,7 +273,7 @@ impl ImageHeader {
         let mut lock = self.metainfo.lock().unwrap();
         let mb = self.metainfo_bytes();
         let metainfo = MetaInfo::parse_bytes(&mb)
-            .ok_or(format_err!("ImageHeader has invalid metainfo"))?;
+            .ok_or_else(|| format_err!("ImageHeader has invalid metainfo"))?;
         *lock = Some(Arc::new(metainfo));
         Ok(())
     }
@@ -338,7 +335,7 @@ impl ImageHeader {
 
     pub fn set_metainfo_bytes(&self, bytes: &[u8]) -> Result<()> {
         let metainfo = MetaInfo::parse_bytes(bytes)
-            .ok_or(format_err!("Could not parse metainfo bytes as valid metainfo document"))?;
+            .ok_or_else(|| format_err!("Could not parse metainfo bytes as valid metainfo document"))?;
 
         let mut lock = self.metainfo.lock().unwrap();
         self.with_bytes_mut(|bs| {
@@ -418,6 +415,14 @@ impl ImageHeader {
     }
 }
 
+impl Default for ImageHeader {
+    fn default() -> Self {
+        let metainfo = Mutex::new(None);
+        let buffer = HeaderBytes::create_empty();
+        let timestamp = AtomicIsize::new(0);
+        ImageHeader { buffer, metainfo, timestamp }
+    }
+}
 
 #[derive(Deserialize, Serialize, Clone, Default)]
 pub struct MetaInfo {

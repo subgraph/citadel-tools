@@ -205,7 +205,7 @@ impl NewRealmDialog {
     fn call_id<V: View, F: FnOnce(&mut V) -> R, R>(&mut self, id: &str, callback: F) -> R
     {
         self.call_on_id(id, callback)
-            .expect(format!("failed call_on_id({})", id).as_str())
+            .unwrap_or_else(|| panic!("failed call_on_id({})", id))
     }
 }
 
@@ -320,7 +320,7 @@ impl NewRealmFSDialog {
     fn call_id<V: View, F: FnOnce(&mut V) -> R, R>(&mut self, id: &str, callback: F) -> R
     {
         self.call_on_id(id, callback)
-            .expect(format!("failed call_on_id({})", id).as_str())
+            .unwrap_or_else(|| panic!("failed call_on_id({})", id))
     }
 
     fn set_ok_button_enabled(&mut self, enabled: bool) {

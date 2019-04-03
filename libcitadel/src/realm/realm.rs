@@ -26,7 +26,7 @@ enum RealmActiveState {
 }
 
 impl RealmActiveState {
-    fn from_sysctl_output(line: &str) -> RealmActiveState {
+    fn from_sysctl_output(line: &str) -> Self {
         match line {
             "active" => RealmActiveState::Active,
             "inactive" => RealmActiveState::Inactive,
@@ -247,7 +247,7 @@ impl Realm {
     pub fn cleanup_rootfs(&self) {
         RealmOverlay::remove_any_overlay(self);
 
-        if let Some(mountpoint) = self.realmfs_mountpoint() {
+        if let Some(ref mountpoint) = self.realmfs_mountpoint() {
             self.manager().release_mountpoint(mountpoint);
         }
 

@@ -72,8 +72,8 @@ impl Logger {
         logger.log_message(level, message.as_ref());
     }
 
-    fn new() -> Logger {
-        Logger { level: LogLevel::Notice, output: Box::new(DefaultLogOutput) }
+    fn new() -> Self {
+        Self { level: LogLevel::Notice, output: Box::new(DefaultLogOutput) }
     }
 
     fn log_message(&mut self, level: LogLevel, message: &str) {
@@ -96,11 +96,11 @@ impl Logger {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone,Default)]
 pub struct DefaultLogOutput;
 
 impl DefaultLogOutput {
-    pub fn new() -> Self { DefaultLogOutput }
+    pub fn new() -> Self { DefaultLogOutput::default() }
 }
 
 impl LogOutput for DefaultLogOutput {

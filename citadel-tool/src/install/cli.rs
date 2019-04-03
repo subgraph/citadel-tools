@@ -91,8 +91,8 @@ fn choose_disk() -> Result<Option<Disk>> {
 
 fn prompt_choose_disk(disks: &[Disk]) -> Result<()> {
     println!("Available disks:\n");
-    for idx in 0..disks.len() {
-        println!("  [{}]: {} Size: {} Model: {}", idx + 1, disks[idx].path().display(), disks[idx].size_str(), disks[idx].model());
+    for (idx,disk) in disks.iter().enumerate() {
+        println!("  [{}]: {} Size: {} Model: {}", idx + 1, disk.path().display(), disk.size_str(), disk.model());
     }
     print!("\nChoose a disk to install to (q to quit): ");
     io::stdout().flush()?;

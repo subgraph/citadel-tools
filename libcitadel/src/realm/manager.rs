@@ -9,6 +9,7 @@ use crate::realmfs::realmfs_set::RealmFSSet;
 use super::systemd::Systemd;
 use super::network::NetworkConfig;
 use super::events::{RealmEventListener, RealmEvent};
+use crate::realm::realms::HasCurrentChanged;
 
 pub struct RealmManager {
     inner: RwLock<Inner>,
@@ -38,25 +39,25 @@ impl RealmManager {
         Ok(network)
     }
 
-    pub fn load() -> Result<Arc<RealmManager>> {
+    pub fn load() -> Result<Arc<Self>> {
         let inner = Inner::new()?;
         let inner = RwLock::new(inner);
 
-        let network = RealmManager::create_network_config()?;
+        let network = Self::create_network_config()?;
         let systemd =  Systemd::new(network);
 
         let manager = RealmManager{ inner, systemd };
         let manager = Arc::new(manager);
 
-        manager.set_manager(manager.clone());
+        manager.set_manager(&manager);
 
         Ok(manager)
     }
 
-    fn set_manager(&self, manager: Arc<RealmManager>) {
+    fn set_manager(&self, manager: &Arc<RealmManager>) {
         let mut inner = self.inner_mut();
-        inner.events.set_manager(manager.clone());
-        inner.realms.set_manager(manager.clone());
+        inner.events.set_manager(manager);
+        inner.realms.set_manager(manager);
         inner.realmfs_set.set_manager(manager);
     }
 
@@ -102,7 +103,7 @@ impl RealmManager {
 
     pub fn run_in_current<S: AsRef<str>>(args: &[S], use_launcher: bool) -> Result<()> {
         let realm = Realms::load_current_realm()
-            .ok_or(format_err!("Could not find current realm"))?;
+            .ok_or_else(|| format_err!("Could not find current realm"))?;
 
         if !realm.is_active() {
             bail!("Current realm {} is not active?", realm.name());
@@ -130,8 +131,7 @@ impl RealmManager {
             .into_iter()
             .filter(|r| {
                 r.realmfs_mountpoint()
-                    .map(|mp| activation.is_mountpoint(&mp))
-                    .unwrap_or(false)
+                    .map_or(false, |mp| activation.is_mountpoint(&mp))
             })
             .collect()
     }
@@ -150,7 +150,7 @@ impl RealmManager {
 
     /// Notify `RealmManager` that `mountpoint` has been released by a
     /// `Realm`.
-    pub fn release_mountpoint(&self, mountpoint: Mountpoint) {
+    pub fn release_mountpoint(&self, mountpoint: &Mountpoint) {
         info!("releasing mountpoint: {}", mountpoint);
         if !mountpoint.is_valid() {
             warn!("bad mountpoint {} passed to release_mountpoint()", mountpoint);
@@ -158,12 +158,12 @@ impl RealmManager {
         }
 
         if let Some(realmfs) = self.realmfs_by_name(mountpoint.realmfs()) {
-            if realmfs.release_mountpoint(&mountpoint) {
+            if realmfs.release_mountpoint(mountpoint) {
                 return;
             }
         }
 
-        if let Some(activation) = Activation::for_mountpoint(&mountpoint) {
+        if let Some(activation) = Activation::for_mountpoint(mountpoint) {
             let active = self.active_mountpoints();
             if let Err(e) = activation.deactivate(&active) {
                 warn!("error on detached deactivation for {}: {}",activation.device(), e);
@@ -308,7 +308,7 @@ impl RealmManager {
         }
     }
 
-    pub fn has_current_changed(&self) -> Option<Option<Realm>> {
+    pub fn has_current_changed(&self) -> HasCurrentChanged {
         self.inner_mut().realms.has_current_changed()
     }
 

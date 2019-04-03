@@ -80,10 +80,8 @@ impl IconSync {
         for entry in fs::read_dir(&base)? {
             let entry = entry?;
             let apps = entry.path().join("apps");
-            if apps.exists() {
-                if self.search_subdirectory(&base, &apps, icon_name)? {
-                    found = true;
-                }
+            if apps.exists() && self.search_subdirectory(&base, &apps, icon_name)? {
+                found = true;
             }
         }
         if found {

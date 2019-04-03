@@ -24,7 +24,7 @@ impl LoopDevice {
             args += &format!("--offset {} ", offset);
         }
         if read_only {
-            args += &format!("--read-only ");
+            args += "--read-only ";
         }
         args += &format!("-f --show {}", image.display());
         let output = cmd_with_output!(Self::LOSETUP, args)?;
@@ -64,8 +64,8 @@ impl LoopDevice {
         // /dev/loop1: [0036]:64845938 (/storage/resources/dev/citadel-extra-dev-001.img), offset 4096
         let output:String = cmd_with_output!(Self::LOSETUP, "-j {}", image.display())?;
         Ok(output.lines()
-            .flat_map(|line| line.splitn(2, ":").next())
-            .map(|s| LoopDevice::new(s))
+            .flat_map(|line| line.splitn(2, ':').next())
+            .map(LoopDevice::new)
             .collect())
     }
 

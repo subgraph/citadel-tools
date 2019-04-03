@@ -8,7 +8,7 @@ mod build;
 
 pub fn main(args: Vec<String>) {
 
-    let config_path = match args.iter().skip(1).next() {
+    let config_path = match args.get(1) {
         Some(arg) => arg,
         None => {
             println!("Expected config file argument");

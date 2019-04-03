@@ -124,7 +124,7 @@ fn image_info(arg_matches: &ArgMatches) -> Result<()> {
 fn parse_resize_size(s: &str) -> Result<ResizeSize> {
     let unit = s.chars().last().filter(|c| c.is_alphabetic());
 
-    let skip = if s.starts_with("+") { 1 } else { 0 };
+    let skip = if s.starts_with('+') { 1 } else { 0 };
     let size = s.chars()
         .skip(skip)
         .take_while(|c| c.is_numeric())
@@ -149,7 +149,7 @@ fn resize(arg_matches: &ArgMatches) -> Result<()> {
 
     };
     info!("Size is {}", size_arg);
-    let mode_add = size_arg.starts_with("+");
+    let mode_add = size_arg.starts_with('+');
     let size = parse_resize_size(size_arg)?;
 
     if mode_add {

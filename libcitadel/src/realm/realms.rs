@@ -21,8 +21,8 @@ impl RealmMapList {
        RealmMapList { manager, map, list }
     }
 
-    fn set_manager(&mut self, manager: Arc<RealmManager>) {
-        self.manager = Arc::downgrade(&manager);
+    fn set_manager(&mut self, manager: &Arc<RealmManager>) {
+        self.manager = Arc::downgrade(manager);
         self.list.iter_mut().for_each(|r| r.set_manager(manager.clone()));
         self.map.iter_mut().for_each(|(_,r)| r.set_manager(manager.clone()));
     }
@@ -55,6 +55,11 @@ impl RealmMapList {
     }
 }
 
+pub enum HasCurrentChanged {
+    Changed(Option<Realm>),
+    NotChanged,
+}
+
 pub struct Realms {
     manager: Weak<RealmManager>,
     realms: RealmMapList,
@@ -84,7 +89,8 @@ impl Realms {
     fn all_realms(mark_active: bool) -> Result<Vec<Realm>> {
         let mut v = Vec::new();
         for entry in fs::read_dir(Realms::BASE_PATH)? {
-            if let Some(realm) = Realms::entry_to_realm(entry?) {
+            let entry = entry?;
+            if let Some(realm) = Realms::entry_to_realm(&entry) {
                 v.push(realm);
             }
         }
@@ -94,14 +100,14 @@ impl Realms {
         Ok(v)
     }
 
-    pub fn set_manager(&mut self, manager: Arc<RealmManager>) {
-        self.manager = Arc::downgrade(&manager);
+    pub fn set_manager(&mut self, manager: &Arc<RealmManager>) {
+        self.manager = Arc::downgrade(manager);
         self.realms.set_manager(manager);
     }
 
     // Examine a directory entry and if it looks like a legit realm directory
     // extract realm name and return a `Realm` instance.
-    fn entry_to_realm(entry: fs::DirEntry) -> Option<Realm> {
+    fn entry_to_realm(entry: &fs::DirEntry) -> Option<Realm> {
         match entry.path().symlink_metadata() {
             Ok(ref meta) if meta.is_dir() => {},
             _ => return None,
@@ -215,7 +221,7 @@ impl Realms {
     // or when adding or removing a realm directory.
     //
     fn realmslock() -> Result<FileLock> {
-        let lockpath = Path::new(Realms::BASE_PATH)
+        let lockpath = Path::new(Self::BASE_PATH)
             .join(".realmslock");
 
         FileLock::acquire(lockpath)
@@ -263,21 +269,20 @@ impl Realms {
     }
 
     pub fn set_realm_current(&mut self, realm: &Realm) -> Result<()> {
-        symlink::write(realm.run_path(), Realms::current_realm_symlink(), true)?;
+        symlink::write(realm.run_path(), Self::current_realm_symlink(), true)?;
         self.last_current = Some(realm.clone());
         Ok(())
     }
 
     pub fn set_realm_default(&self, realm: &Realm) -> Result<()> {
-        symlink::write(realm.base_path(), Realms::default_symlink(), false)
+        symlink::write(realm.base_path(), Self::default_symlink(), false)
     }
 
     fn set_arbitrary_default(&mut self) -> Result<()> {
         // Prefer a recently used realm and don't choose a system realm
         let choice = self.sorted()
             .into_iter()
-            .filter(|r| !r.is_system())
-            .next();
+            .find(|r| !r.is_system());
 
         if let Some(realm) = choice {
             info!("Setting '{}' as new default realm", realm.name());
@@ -305,25 +310,23 @@ impl Realms {
     }
 
     pub fn current(&mut self) -> Option<Realm> {
-        let current = Realms::current_realm_name().and_then(|name| self.by_name(&name));
+        let current = Self::current_realm_name().and_then(|name| self.by_name(&name));
         self.last_current = current.clone();
         current
     }
 
-    // None   : no it's the same
-    // Some() : yes and here's the new value
-    pub fn has_current_changed(&mut self) -> Option<Option<Realm>> {
+    pub fn has_current_changed(&mut self) -> HasCurrentChanged {
         let old = self.last_current.clone();
         let current = self.current();
         if current == old {
-            None
+            HasCurrentChanged::NotChanged
         } else {
-            Some(current)
+            HasCurrentChanged::Changed(current)
         }
     }
 
     pub fn default(&self) -> Option<Realm> {
-        Realms::default_realm_name().and_then(|name| self.by_name(&name))
+        Self::default_realm_name().and_then(|name| self.by_name(&name))
     }
 
     /// Return the `Realm` marked as current, or `None` if no realm is current.
@@ -338,7 +341,7 @@ impl Realms {
     /// If the symlink exists it will point to run path of the current realm.
     ///
     pub fn load_current_realm() -> Option<Realm> {
-        Realms::current_realm_name().map(|ref name| Realm::new(name))
+        Self::current_realm_name().map(|ref name| Realm::new(name))
     }
 
     /// Return `true` if some realm has been marked as current.
@@ -349,57 +352,57 @@ impl Realms {
     ///     /run/citadel/realms/current/current.realm
     ///
     pub fn is_some_realm_current() -> bool {
-        Realms::current_realm_symlink().exists()
+        Self::current_realm_symlink().exists()
     }
 
     /// Set no realm as current by removing the current.realm symlink.
     fn clear_current_realm() -> Result<()> {
-        symlink::remove(Realms::current_realm_symlink())
+        symlink::remove(Self::current_realm_symlink())
     }
 
     /// Set no realm as default by removing the default.realm symlink.
     pub fn clear_default_realm() -> Result<()> {
-        symlink::remove(Realms::default_symlink())
+        symlink::remove(Self::default_symlink())
     }
 
     // Path of 'current.realm' symlink
     pub fn current_realm_symlink() -> PathBuf {
-        Path::new(Realms::RUN_PATH)
+        Path::new(Self::RUN_PATH)
             .join("current")
             .join("current.realm")
     }
 
     pub fn current_realm_name() -> Option<String> {
-        Realms::read_current_realm_symlink().as_ref().and_then(Realms::path_to_realm_name)
+        Self::read_current_realm_symlink().as_ref().and_then(Self::path_to_realm_name)
     }
 
     pub fn read_current_realm_symlink() -> Option<PathBuf> {
-        symlink::read(Realms::current_realm_symlink())
+        symlink::read(Self::current_realm_symlink())
     }
 
     // Path of 'default.realm' symlink
     pub fn default_symlink() -> PathBuf {
-        Path::new(Realms::BASE_PATH)
+        Path::new(Self::BASE_PATH)
             .join("default.realm")
     }
 
     pub fn default_realm_name() -> Option<String> {
-        Realms::read_default_symlink().as_ref().and_then(Realms::path_to_realm_name)
+        Self::read_default_symlink().as_ref().and_then(Self::path_to_realm_name)
     }
 
     fn read_default_symlink() -> Option<PathBuf> {
-        symlink::read(Realms::default_symlink())
+        symlink::read(Self::default_symlink())
     }
 
     fn path_to_realm_name(path: impl AsRef<Path>) -> Option<String> {
         let path = path.as_ref();
-        if path.starts_with(Realms::BASE_PATH) {
-            path.strip_prefix(Realms::BASE_PATH).ok()
-        } else if path.starts_with(Realms::RUN_PATH) {
-            path.strip_prefix(Realms::RUN_PATH).ok()
+        if path.starts_with(Self::BASE_PATH) {
+            path.strip_prefix(Self::BASE_PATH).ok()
+        } else if path.starts_with(Self::RUN_PATH) {
+            path.strip_prefix(Self::RUN_PATH).ok()
         } else {
             None
-        }.and_then(Realms::dir_to_realm_name)
+        }.and_then(Self::dir_to_realm_name)
     }
 
     fn dir_to_realm_name(dir: &Path) -> Option<String> {

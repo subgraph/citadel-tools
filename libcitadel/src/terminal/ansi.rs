@@ -3,6 +3,7 @@ use crate::Result;
 use crate::terminal::{RawTerminal, Color, Base16Scheme};
 use std::io::{self,Read,Write,Stdout};
 
+#[derive(Default)]
 pub struct AnsiControl(String);
 
 impl AnsiControl {
@@ -11,50 +12,45 @@ impl AnsiControl {
     const OSC: char = ']';
     const ST: char = '\\';
 
-    pub fn new() -> Self {
-        AnsiControl(String::new())
-    }
-
     pub fn osc(n: u32) -> Self {
-        AnsiControl::new()
-            .push(AnsiControl::ESC)
-            .push(AnsiControl::OSC)
+        Self::default()
+            .push(Self::ESC)
+            .push(Self::OSC)
             .num(n)
     }
 
     pub fn csi() -> Self {
-        AnsiControl::new()
-            .push(AnsiControl::ESC)
-            .push(AnsiControl::CSI)
+        Self::default()
+            .push(Self::ESC)
+            .push(Self::CSI)
     }
 
     pub fn bold() -> Self {
-        AnsiControl::csi().push_str("1m")
+        Self::csi().push_str("1m")
     }
 
     pub fn unbold() -> Self {
-        AnsiControl::csi().push_str("22m")
+        Self::csi().push_str("22m")
     }
 
     pub fn clear() -> Self {
-        AnsiControl::csi().push_str("2J")
+        Self::csi().push_str("2J")
     }
 
     pub fn goto(x: u16, y: u16) -> Self {
-        AnsiControl::csi().push_str(x.to_string()).push(';').push_str(y.to_string()).push('H')
+        Self::csi().push_str(x.to_string()).push(';').push_str(y.to_string()).push('H')
     }
 
-    pub fn set_window_title<S: AsRef<str>>(title: S) -> AnsiControl {
-//        AnsiControl::osc(2).sep().push_str(title.as_ref()).st()
-        AnsiControl::osc(0).sep().push_str(title.as_ref()).st()
+    pub fn set_window_title<S: AsRef<str>>(title: S) -> Self {
+        Self::osc(0).sep().push_str(title.as_ref()).st()
     }
 
-    pub fn window_title_push_stack() -> AnsiControl {
-        AnsiControl::csi().push_str("22;2t")
+    pub fn window_title_push_stack() -> Self {
+        Self::csi().push_str("22;2t")
     }
 
-    pub fn window_title_pop_stack() -> AnsiControl {
-        AnsiControl::csi().push_str("23;2t")
+    pub fn window_title_pop_stack() -> Self {
+        Self::csi().push_str("23;2t")
     }
 
     pub fn sep(self) -> Self {
@@ -70,7 +66,7 @@ impl AnsiControl {
     }
 
     pub fn st(self) -> Self {
-        self.push(AnsiControl::ESC).push(AnsiControl::ST)
+        self.push(Self::ESC).push(Self::ST)
     }
 
     pub fn push_str<S: AsRef<str>>(mut self, s: S) -> Self {
@@ -92,8 +88,8 @@ impl AnsiControl {
     }
 
     fn parse_color_response(s: &str) -> Result<Vec<(u32, Color)>> {
-        let prefix = AnsiControl::osc(4).sep();
-        let suffix = AnsiControl::new().st();
+        let prefix = Self::osc(4).sep();
+        let suffix = Self::default().st();
         let mut res = Vec::new();
 
         let mut ptr = s;
@@ -104,14 +100,14 @@ impl AnsiControl {
                 None => bail!(":("),
             };
             let (elem, s) = s.split_at(offset);
-            res.push(AnsiControl::parse_idx_color_pair(elem)?);
+            res.push(Self::parse_idx_color_pair(elem)?);
             ptr = s.trim_start_matches(suffix.as_str());
         }
         Ok(res)
     }
 
     fn parse_idx_color_pair(s: &str) -> Result<(u32, Color)> {
-        let v = s.split(";").collect::<Vec<_>>();
+        let v = s.split(';').collect::<Vec<_>>();
         if v.len() != 2 {
             bail!("bad elem {}", s);
         }
@@ -175,7 +171,7 @@ impl AnsiTerminal {
 
     pub fn read_palette_bg(&mut self) -> Result<Color> {
         let prefix = AnsiControl::osc(11).sep();
-        let suffix = AnsiControl::new().st();
+        let suffix = AnsiControl::default().st();
         self.write_code(AnsiControl::osc(11).sep().push('?').st())?;
         let response = self.read_response()?;
         let color = Color::parse(response.trim_start_matches(prefix.as_str()).trim_end_matches(suffix.as_str()))?;
@@ -184,7 +180,7 @@ impl AnsiTerminal {
     }
     pub fn read_palette_fg(&mut self) -> Result<Color> {
         let prefix = AnsiControl::osc(10).sep();
-        let suffix = AnsiControl::new().st();
+        let suffix = AnsiControl::default().st();
         self.write_code(AnsiControl::osc(10).sep().push('?').st())?;
         let response = self.read_response()?;
         let color = Color::parse(response.trim_start_matches(prefix.as_str()).trim_end_matches(suffix.as_str()))?;

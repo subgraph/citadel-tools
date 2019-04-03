@@ -38,40 +38,40 @@ impl CommandLine {
 
     /// Return `true` if variable citadel.noverity is present on kernel command line.
     pub fn noverity() -> bool {
-        CommandLine::var_exists("citadel.noverity")
+        Self::var_exists("citadel.noverity")
     }
 
     pub fn nosignatures() -> bool {
-        CommandLine::var_exists("citadel.nosignatures")
+        Self::var_exists("citadel.nosignatures")
     }
 
     /// Return `true` if variable citadel.install is present on kernel command line.
     pub fn install_mode() -> bool {
-        CommandLine::var_exists("citadel.install")
+        Self::var_exists("citadel.install")
     }
 
     /// Return `true` if variable citadel.live is present on kernel command line.
     pub fn live_mode() -> bool {
-        CommandLine::var_exists("citadel.live")
+        Self::var_exists("citadel.live")
     }
 
     /// Return `true` if variable citadel.recovery is present on kernel command line.
     pub fn recovery_mode() -> bool {
-        CommandLine::var_exists("citadel.recovery")
+        Self::var_exists("citadel.recovery")
     }
 
-    pub fn overlay() -> bool { CommandLine::var_exists("citadel.overlay") }
+    pub fn overlay() -> bool { Self::var_exists("citadel.overlay") }
 
     /// Return `true` if sealed realmfs images are enabled on kernel command line
-    pub fn sealed() -> bool { CommandLine::var_exists("citadel.sealed") }
+    pub fn sealed() -> bool { Self::var_exists("citadel.sealed") }
 
     pub fn channel() -> Option<&'static str> {
-        CommandLine::get_value("citadel.channel")
+        Self::get_value("citadel.channel")
     }
 
     fn _channel() -> Option<(&'static str,Option<&'static str>)> {
-        if let Some(channel) = CommandLine::channel() {
-            let parts = channel.splitn(2, ":").collect::<Vec<_>>();
+        if let Some(channel) = Self::channel() {
+            let parts = channel.splitn(2, ':').collect::<Vec<_>>();
             if parts.len() == 2 {
                 return Some((parts[0], Some(parts[1])))
             }
@@ -82,33 +82,33 @@ impl CommandLine {
     }
 
     pub fn channel_name() -> Option<&'static str> {
-        if let Some((name, _)) = CommandLine::_channel() {
+        if let Some((name, _)) = Self::_channel() {
             return Some(name)
         }
         None
     }
 
     pub fn channel_pubkey() -> Option<&'static str> {
-        if let Some((_, pubkey)) = CommandLine::_channel() {
+        if let Some((_, pubkey)) = Self::_channel() {
             return pubkey
         }
         None
     }
 
     pub fn verbose() -> bool {
-        CommandLine::var_exists("citadel.verbose")
+        Self::var_exists("citadel.verbose")
     }
 
     pub fn debug() -> bool {
-        CommandLine::var_exists("citadel.debug")
+        Self::var_exists("citadel.debug")
     }
 
 
-    fn new() -> CommandLine {
+    fn new() -> Self {
         CommandLine{ varmap: HashMap::new() }
     }
 
-    fn load() -> Result<CommandLine> {
+    fn load() -> Result<Self> {
         let s = fs::read_to_string("/proc/cmdline")?;
         let varmap = CommandLineParser::new(s).parse();
         Ok(CommandLine{varmap})
@@ -157,7 +157,7 @@ struct CommandLineParser {
 }
 
 impl CommandLineParser {
-    fn new(cmdline: String) -> CommandLineParser {
+    fn new(cmdline: String) -> Self {
         CommandLineParser {
             cmdline,
             varmap: HashMap::new(),

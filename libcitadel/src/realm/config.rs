@@ -24,7 +24,7 @@ pub enum OverlayType {
 }
 
 impl OverlayType {
-    pub fn from_str_value(value: &str) -> OverlayType {
+    pub fn from_str_value(value: &str) -> Self {
         if value == "tmpfs" {
             OverlayType::TmpFS
         } else if value == "storage" {
@@ -35,7 +35,7 @@ impl OverlayType {
         }
     }
 
-    pub fn to_str_value(&self) -> Option<&'static str> {
+    pub fn to_str_value(self) -> Option<&'static str> {
         match self {
             OverlayType::None => None,
             OverlayType::TmpFS => Some("tmpfs"),
@@ -122,25 +122,25 @@ pub struct RealmConfig {
 impl RealmConfig {
 
     /// Return an 'unloaded' realm config instance.
-    pub fn unloaded_realm_config(realm_name: &str) -> RealmConfig {
+    pub fn unloaded_realm_config(realm_name: &str) -> Self {
         let path = Path::new(Realms::BASE_PATH)
             .join(format!("realm-{}", realm_name))
             .join("config");
 
-        let mut config = RealmConfig::empty();
+        let mut config = Self::empty();
         config.path = path;
         config
     }
 
-    fn load_global_config() -> RealmConfig {
-        if let Some(mut global) = RealmConfig::load_config("/storage/realms/config") {
-            global.parent = Some(Box::new(RealmConfig::default()));
+    fn load_global_config() -> Self {
+        if let Some(mut global) = Self::load_config("/storage/realms/config") {
+            global.parent = Some(Box::new(Self::default()));
             return global;
         }
-        RealmConfig::default()
+        Self::default()
     }
 
-    fn load_config<P: AsRef<Path>>(path: P) -> Option<RealmConfig> {
+    fn load_config<P: AsRef<Path>>(path: P) -> Option<Self> {
         if path.as_ref().exists() {
             match fs::read_to_string(path.as_ref()) {
                 Ok(s) => return toml::from_str::<RealmConfig>(&s).ok(),
@@ -177,7 +177,7 @@ impl RealmConfig {
             let s = fs::read_to_string(&self.path)?;
             *self = toml::from_str(&s)?;
         } else {
-            *self = RealmConfig::empty();
+            *self = Self::empty();
         }
         self.path = path;
         self.loaded = Some(self.read_mtime());
@@ -185,7 +185,7 @@ impl RealmConfig {
         Ok(())
     }
 
-    pub fn default() -> RealmConfig {
+    pub fn default() -> Self {
         RealmConfig {
             use_shared_dir: Some(true),
             use_ephemeral_home: Some(false),
@@ -215,7 +215,7 @@ impl RealmConfig {
         }
     }
 
-    pub fn empty() -> RealmConfig {
+    pub fn empty() -> Self {
         RealmConfig {
             use_shared_dir: None,
             use_ephemeral_home: None,
@@ -394,8 +394,7 @@ impl RealmConfig {
     /// The type of overlay on root filesystem to set up for this realm.
     pub fn overlay(&self) -> OverlayType {
         self.str_value(|c| c.overlay.as_ref())
-            .map(OverlayType::from_str_value)
-            .unwrap_or(OverlayType::None)
+            .map_or(OverlayType::None, OverlayType::from_str_value)
     }
 
     /// Set the overlay string variable according to the `OverlayType` argument.

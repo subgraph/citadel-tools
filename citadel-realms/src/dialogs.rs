@@ -232,7 +232,7 @@ impl FieldLayout {
         };
 
         let labels = labels
-            .into_iter()
+            .iter()
             .map(pad_label)
             .collect();
 
@@ -308,7 +308,7 @@ pub trait DialogButtonAdapter: Finder+ViewWrapper {
     {
         let id = self.inner_id();
         self.call_on_id(id, cb)
-            .expect(format!("failed call_on_id({})", id).as_str())
+            .unwrap_or_else(|| panic!("failed call_on_id({})", id))
     }
 
     fn button_enabled(&mut self, button: usize) -> bool {
@@ -322,9 +322,9 @@ pub trait DialogButtonAdapter: Finder+ViewWrapper {
 
     fn set_button_enabled(&mut self, button: usize, enabled: bool) {
         self.call_on_dialog(|d| {
-            d.buttons_mut()
-                .nth(button)
-                .map(|b| b.set_enabled(enabled));
+            if let Some(b) = d.buttons_mut().nth(button) {
+                b.set_enabled(enabled);
+            }
         })
     }
 
@@ -416,8 +416,7 @@ impl ValidatorResult {
 
     fn process(self, siv: &mut Cursive) {
         match self {
-            ValidatorResult::Allow(cb) => (cb)(siv),
-            ValidatorResult::Deny(cb) => (cb)(siv),
+            ValidatorResult::Allow(cb) | ValidatorResult::Deny(cb) => (cb)(siv),
         }
     }
 
@@ -470,7 +469,7 @@ impl TextValidator {
         where F: FnOnce(&mut EditView) -> R {
 
         siv.call_on_id(&self.id, f)
-            .expect(&format!("call_on_id({})", self.id))
+            .unwrap_or_else(|| panic!("call_on_id({})", self.id))
     }
 
 }

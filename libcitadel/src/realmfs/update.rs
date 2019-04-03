@@ -63,7 +63,7 @@ impl <'a> Update<'a> {
             .map_err(|e| format_err!("failed to activate update image: {}", e))?;
 
         activation.mountpoint_rw().cloned()
-            .ok_or(format_err!("Update image activation does not have a writeable mountpoint"))
+            .ok_or_else(|| format_err!("Update image activation does not have a writeable mountpoint"))
     }
 
     pub fn run_update_shell(&mut self, command: &str) -> Result<()> {
@@ -83,7 +83,7 @@ impl <'a> Update<'a> {
             .arg("--quiet")
             .arg(format!("--machine={}", self.name()))
             .arg(format!("--directory={}", mountpoint))
-            .arg(format!("--network-zone=clear"))
+            .arg("--network-zone=clear")
             .arg("/bin/bash")
             .arg("-c")
             .arg(command)

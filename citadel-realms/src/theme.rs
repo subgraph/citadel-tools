@@ -46,7 +46,7 @@ impl ThemeHandler {
             (0x3, "highlight_inactive"),
         ];
         for pair in &mapping {
-            ThemeHandler::set_palette_color(&mut theme, pair.1, base16.color(pair.0).rgb());
+            Self::set_palette_color(&mut theme, pair.1, base16.color(pair.0).rgb());
         }
         theme
     }
@@ -55,13 +55,13 @@ impl ThemeHandler {
     const DEFAULT_SCHEME: &'static str = "default-dark";
 
     pub fn save_base16_theme(base16: &Base16Scheme) {
-        if let Err(e) = fs::write(ThemeHandler::SCHEME_CONF_PATH, base16.slug()) {
-            warn!("Error writing color scheme file ({}): {}", ThemeHandler::SCHEME_CONF_PATH, e);
+        if let Err(e) = fs::write(Self::SCHEME_CONF_PATH, base16.slug()) {
+            warn!("Error writing color scheme file ({}): {}", Self::SCHEME_CONF_PATH, e);
         }
     }
 
     pub fn load_base16_scheme() -> Option<Base16Scheme> {
-        let path = Path::new(ThemeHandler::SCHEME_CONF_PATH);
+        let path = Path::new(Self::SCHEME_CONF_PATH);
         if path.exists() {
             fs::read_to_string(path).ok().and_then(|ref s| Base16Scheme::by_name(s).cloned())
         } else {
@@ -70,8 +70,8 @@ impl ThemeHandler {
     }
 
     pub fn load_base16_theme() -> Theme {
-        let path = Path::new(ThemeHandler::SCHEME_CONF_PATH);
-        let mut scheme = Base16Scheme::by_name(ThemeHandler::DEFAULT_SCHEME).unwrap();
+        let path = Path::new(Self::SCHEME_CONF_PATH);
+        let mut scheme = Base16Scheme::by_name(Self::DEFAULT_SCHEME).unwrap();
         if path.exists() {
             if let Ok(scheme_name) = fs::read_to_string(path) {
                 if let Some(sch) = Base16Scheme::by_name(&scheme_name) {
@@ -79,7 +79,7 @@ impl ThemeHandler {
                 }
             }
         }
-        ThemeHandler::generate_base16_theme(scheme)
+        Self::generate_base16_theme(scheme)
     }
 }
 
@@ -91,7 +91,7 @@ impl ThemeChooser {
 
     pub fn open(s: &mut Cursive) {
         let initial = ThemeHandler::load_base16_scheme();
-        let chooser = ThemeChooser::new(initial, |s,v| {
+        let chooser = Self::new(initial, |s,v| {
             ThemeHandler::save_base16_theme(v);
             let theme = ThemeHandler::generate_base16_theme(v);
             s.set_theme(theme);
@@ -99,11 +99,11 @@ impl ThemeChooser {
         s.add_layer(chooser.with_id("theme-chooser"));
     }
 
-    pub fn new<F>(initial: Option<Base16Scheme>, cb: F) -> ThemeChooser
+    pub fn new<F>(initial: Option<Base16Scheme>, cb: F) -> Self
         where F: 'static + Fn(&mut Cursive, &Base16Scheme)
     {
-        let select = ThemeChooser::create_tree_view(initial.clone(), cb);
-        let content = ThemeChooser::create_content(initial, select);
+        let select = Self::create_tree_view(initial.clone(), cb);
+        let content = Self::create_content(initial, select);
         let inner = ViewBox::boxed(content);
         ThemeChooser { inner }
     }
@@ -136,16 +136,16 @@ impl ThemeChooser {
         where F: 'static + Fn(&mut Cursive, &Base16Scheme)
     {
         let mut tree = TreeView::new()
-            .on_select(ThemeChooser::on_tree_select)
-            .on_collapse(ThemeChooser::on_tree_collapse)
+            .on_select(Self::on_tree_select)
+            .on_collapse(Self::on_tree_collapse)
             .on_submit(move |s,idx| {
-                let item = ThemeChooser::call_on_tree(s, |v| v.borrow_item(idx).cloned());
+                let item = Self::call_on_tree(s, |v| v.borrow_item(idx).cloned());
                 if let Some(TreeItem::ColorScheme(ref scheme)) = item {
                     (cb)(s, scheme);
                 }
             });
 
-        ThemeChooser::populate_tree(initial, &mut tree);
+        Self::populate_tree(initial, &mut tree);
         tree.with_id("theme-tree")
     }
 
@@ -154,7 +154,7 @@ impl ThemeChooser {
         let mut category_rows = HashMap::new();
         let mut last_row = 0;
         for scheme in &schemes {
-            last_row = ThemeChooser::add_scheme_to_tree(initial.as_ref(), tree, last_row, scheme, &mut category_rows);
+            last_row = Self::add_scheme_to_tree(initial.as_ref(), tree, last_row, scheme, &mut category_rows);
         }
     }
 
@@ -165,7 +165,7 @@ impl ThemeChooser {
 
         if let Some(category) = scheme.category() {
             let is_initial_category = initial.map(|sc| sc.category() == scheme.category()).unwrap_or(false);
-            let category_row = ThemeChooser::get_category_row(!is_initial_category, tree, &mut last_row, category, category_rows);
+            let category_row = Self::get_category_row(!is_initial_category, tree, &mut last_row, category, category_rows);
             if let Some(new_row) = tree.insert_item(item, Placement::LastChild, category_row) {
                 if is_initial {
                     tree.set_selected_row(new_row);
@@ -198,7 +198,7 @@ impl ThemeChooser {
 
 
     fn on_tree_select(s: &mut Cursive, idx: usize) {
-        let selected = ThemeChooser::call_on_tree(s, |v| v.borrow_item(idx).cloned());
+        let selected = Self::call_on_tree(s, |v| v.borrow_item(idx).cloned());
 
         if let Some(item) = selected {
             if let TreeItem::ColorScheme(scheme) = item {
@@ -208,9 +208,9 @@ impl ThemeChooser {
     }
 
     fn on_tree_collapse(s: &mut Cursive, row: usize, is_collapsed: bool, _: usize) {
-        ThemeChooser::call_on_tree(s, |v| {
+        Self::call_on_tree(s, |v| {
             if let Some(item) = v.borrow_item_mut(row) {
-                if let &mut TreeItem::Category(ref _name, ref mut collapsed) = item {
+                if let TreeItem::Category(ref _name, ref mut collapsed) = *item {
                     *collapsed = is_collapsed;
                 }
             }
@@ -227,9 +227,9 @@ impl ThemeChooser {
 
     fn toggle_expand_item(&self) -> EventResult {
         EventResult::with_cb(|s| {
-            ThemeChooser::call_on_tree(s, |v| {
+            Self::call_on_tree(s, |v| {
                 if let Some(row) = v.row() {
-                    ThemeChooser::toggle_item_collapsed(v, row);
+                    Self::toggle_item_collapsed(v, row);
                 }
             })
         })

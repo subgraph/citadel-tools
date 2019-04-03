@@ -39,8 +39,8 @@ impl ResourceImage {
     /// Locate and return a resource image of type `image_type`.
     /// First the /run/citadel/images directory is searched, and if not found there,
     /// the image will be searched for in /storage/resources/$channel
-    pub fn find(image_type: &str) -> Result<ResourceImage> {
-        let channel = ResourceImage::rootfs_channel();
+    pub fn find(image_type: &str) -> Result<Self> {
+        let channel = Self::rootfs_channel();
 
         info!("Searching run directory for image {} with channel {}", image_type, channel);
 
@@ -48,7 +48,7 @@ impl ResourceImage {
             return Ok(image);
         }
 
-        if !ResourceImage::ensure_storage_mounted()? {
+        if !Self::ensure_storage_mounted()? {
             bail!("Unable to mount /storage");
         }
 
@@ -62,24 +62,24 @@ impl ResourceImage {
     }
 
     pub fn mount_image_type(image_type: &str) -> Result<()> {
-        let mut image = ResourceImage::find(image_type)?;
+        let mut image = Self::find(image_type)?;
         image.mount()
     }
 
     /// Locate a rootfs image in /run/citadel/images and return it
-    pub fn find_rootfs() -> Result<ResourceImage> {
+    pub fn find_rootfs() -> Result<Self> {
         match search_directory(RUN_DIRECTORY, "rootfs", None)? {
             Some(image) => Ok(image),
             None => Err(format_err!("Failed to find rootfs resource image")),
         }
     }
 
-    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<ResourceImage> {
+    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self> {
         let header = ImageHeader::from_file(path.as_ref())?;
         if !header.is_magic_valid() {
             bail!("Image file {} does not have a valid header", path.as_ref().display());
         }
-        Ok(ResourceImage::new(path.as_ref(), header ))
+        Ok(Self::new(path.as_ref(), header ))
     }
 
     pub fn is_valid_image(&self) -> bool {
@@ -103,7 +103,7 @@ impl ResourceImage {
         self.header.metainfo()
     }
 
-    fn new(path: &Path, header: ImageHeader) -> ResourceImage {
+    fn new(path: &Path, header: ImageHeader) -> Self {
         assert_eq!(path.extension(), Some(OsStr::new("img")), "image filename must have .img extension");
 
         ResourceImage {
@@ -297,14 +297,14 @@ impl ResourceImage {
     // If no colon character is present then the source and target paths are the same.
     // The source path from the mounted resource image will be bind mounted to the target path on the system rootfs.
     fn process_manifest_line(&self, line: &str) -> Result<()> {
-        let line = line.trim_left_matches('/');
+        let line = line.trim_start_matches('/');
 
-        let (path_from, path_to) = if line.contains(":") {
-            let v = line.split(":").collect::<Vec<_>>();
+        let (path_from, path_to) = if line.contains(':') {
+            let v = line.split(':').collect::<Vec<_>>();
             if v.len() != 2 {
                 bail!("badly formed line '{}'", line);
             }
-            (v[0], v[1].trim_left_matches('/'))
+            (v[0], v[1].trim_start_matches('/'))
         } else {
             (line, line)
         };
@@ -418,7 +418,7 @@ fn parse_timestamp(img: &ResourceImage) -> Result<usize> {
 
 fn current_kernel_version() -> String {
     let utsname = UtsName::uname();
-    let v = utsname.release().split("-").collect::<Vec<_>>();
+    let v = utsname.release().split('-').collect::<Vec<_>>();
     v[0].to_string()
 }
 
@@ -484,10 +484,8 @@ fn maybe_add_dir_entry(entry: DirEntry,
         return Ok(())
     }
 
-    if image_type == "kernel" {
-        if metainfo.kernel_version() != kernel_version || metainfo.kernel_id() != kernel_id {
-            return Ok(());
-        }
+    if image_type == "kernel" && (metainfo.kernel_version() != kernel_version || metainfo.kernel_id() != kernel_id) {
+        return Ok(());
     }
 
     images.push(ResourceImage::new(&path, header));

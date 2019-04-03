@@ -129,7 +129,7 @@ impl DesktopFile {
     pub fn add_action_line(&mut self, action: &str, line: Line) {
         if line.is_key_value_type() {
             let idx = self.lines.len();
-            let map = self.groups.entry(action.to_string()).or_insert(HashMap::new());
+            let map = self.groups.entry(action.to_string()).or_insert_with(HashMap::new);
             map.insert(line.get_key_string(), idx);
         }
         self.lines.push(line);

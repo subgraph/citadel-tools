@@ -140,8 +140,8 @@ impl Backend {
     }
 
     fn apply_colors(&self, colors: theme::ColorPair) {
-        with_color(&colors.front, |c| self.write(tcolor::Fg(c)));
-        with_color(&colors.back, |c| self.write(tcolor::Bg(c)));
+        with_color(colors.front, |c| self.write(tcolor::Fg(c)));
+        with_color(colors.back, |c| self.write(tcolor::Bg(c)));
     }
 
     fn map_key(&mut self, event: TEvent) -> Event {
@@ -257,7 +257,7 @@ impl backend::Backend for Backend {
             self.current_style.set(color);
         }
 
-        return current_style;
+        current_style
     }
 
     fn set_effect(&self, effect: theme::Effect) {
@@ -326,11 +326,11 @@ impl backend::Backend for Backend {
     }
 }
 
-fn with_color<F, R>(clr: &theme::Color, f: F) -> R
+fn with_color<F, R>(clr: theme::Color, f: F) -> R
 where
     F: FnOnce(&dyn tcolor::Color) -> R,
 {
-    match *clr {
+    match clr {
         theme::Color::TerminalDefault => f(&tcolor::Reset),
         theme::Color::Dark(theme::BaseColor::Black) => f(&tcolor::Black),
         theme::Color::Dark(theme::BaseColor::Red) => f(&tcolor::Red),
@@ -374,10 +374,8 @@ pub fn start_resize_thread(
             // We know it will only contain SIGWINCH signals, so no need to check.
             if signals.wait().count() > 0 {
                 // XXX fixed to avoid panic
-                if resize_running.load(Ordering::Relaxed) {
-                    if let Err(_) = resize_sender.send(()) {
-                        return;
-                    }
+                if resize_running.load(Ordering::Relaxed) && resize_sender.send(()).is_err() {
+                    return;
                 }
             }
         }

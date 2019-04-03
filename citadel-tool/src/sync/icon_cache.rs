@@ -38,7 +38,7 @@ impl IconCache {
         key.bytes().fold(0u32, |h, b|
             (h << 5)
             .wrapping_sub(h)
-            .wrapping_add(b as u32))
+            .wrapping_add(u32::from(b)))
     }
 
     fn read_string(&self, offset: usize) -> Result<String> {

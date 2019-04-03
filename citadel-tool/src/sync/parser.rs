@@ -108,7 +108,7 @@ impl DesktopFileParser {
 
         if let Line::KeyValue(ref k, ref value) = line {
             if k == "Actions" {
-                for s in value.split_terminator(";") {
+                for s in value.split_terminator(';') {
                     self.known_actions.insert(s.trim().to_string());
                 }
             }
@@ -152,7 +152,7 @@ impl DesktopFileParser {
     }
 }
 
-const DESKTOP_ACTION: &'static str = "Desktop Action ";
+const DESKTOP_ACTION: &str = "Desktop Action ";
 
 struct LineParser<'a> {
     s: &'a str,
@@ -202,17 +202,17 @@ impl <'a> LineParser<'a> {
         } else if content == "Desktop Entry" {
             return Some(Line::DesktopHeader)
         }
-        return Some(Line::GroupHeader(content.to_string()))
+        Some(Line::GroupHeader(content.to_string()))
     }
 
     fn parse_keyval(&self) -> Option<Line> {
-        let parts: Vec<&str> = self.s.splitn(2, "=").collect();
+        let parts: Vec<&str> = self.s.splitn(2, '=').collect();
         if parts.len() != 2 {
             return None
         }
         let key = parts[0].trim();
         let val = parts[1].trim();
-        if !key.contains("[") {
+        if !key.contains('[') {
             if key == "Exec" {
                 return Some(Line::ExecLine(val.to_string()))
             }
@@ -222,7 +222,7 @@ impl <'a> LineParser<'a> {
     }
 
     fn parse_locale(&self, key: &str) -> Option<(String,String)> {
-        let idx = key.find("[").unwrap();
+        let idx = key.find('[').unwrap();
         let (k,loc) = key.split_at(idx);
         let mut chars = loc.chars();
         if let Some(']') = chars.next_back() {

@@ -67,6 +67,7 @@ pub fn sha256<P: AsRef<Path>>(path: P) -> Result<String> {
     Ok(v[0].trim().to_owned())
 }
 
+#[derive(Copy,Clone)]
 pub enum FileRange {
     All,
     Offset(usize),
@@ -78,13 +79,13 @@ fn ranged_reader<P: AsRef<Path>>(path: P, range: FileRange) -> Result<Box<dyn Re
     let offset = match range {
         FileRange::All => 0,
         FileRange::Offset(n) => n,
-        FileRange::Range {offset, len: _} => offset,
+        FileRange::Range {offset, .. } => offset,
     };
     if offset > 0 {
         f.seek(SeekFrom::Start(offset as u64))?;
     }
     let r = BufReader::new(f);
-    if let FileRange::Range {offset: _, len} = range {
+    if let FileRange::Range {len, ..} = range {
         Ok(Box::new(r.take(len as u64)))
     } else {
         Ok(Box::new(r))
@@ -191,7 +192,7 @@ fn _copy_tree(from_base: &Path, to_base: &Path, chown_to: Option<(u32,u32)>) -> 
     for entry in WalkDir::new(from_base) {
         let path = entry?.path().to_owned();
         let to = to_base.join(path.strip_prefix(from_base)?);
-        if &to != to_base {
+        if to != to_base {
             copy_path(&path, &to, chown_to)
                 .map_err(|e| format_err!("failed to copy {} to {}: {}", path.display(), to.display(), e))?;
         }

@@ -134,8 +134,7 @@ impl <T: Clone + 'static> ItemList<T> {
         where F: FnOnce(&mut ItemList<T>) -> R
     {
         s.call_on_id(id, |v: &mut ItemList<T>| f(v))
-            .expect(&format!("ItemList::call_on_id({})", id))
-
+            .unwrap_or_else(|| panic!("ItemList::call_on_id({})", id))
     }
 
     pub fn create<C>(id: &'static str, title: &str, content: C) -> impl View
@@ -294,7 +293,7 @@ impl Inner {
     }
 
     fn pop_style(&mut self) -> Style {
-        self.styles.pop().unwrap_or(Style::none())
+        self.styles.pop().unwrap_or_default()
     }
 
     fn append(&mut self, s: StyledString) {

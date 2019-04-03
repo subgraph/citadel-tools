@@ -18,19 +18,19 @@ struct HeaderInfo {
 }
 
 impl Partition {
-    pub fn rootfs_partitions() -> Result<Vec<Partition>> {
+    pub fn rootfs_partitions() -> Result<Vec<Self>> {
         let mut v = Vec::new();
         for path in rootfs_partition_paths()? {
-            let partition = Partition::load(&path)?;
+            let partition = Self::load(&path)?;
             v.push(partition);
         }
         v.sort_unstable_by(|a,b| a.path().cmp(b.path()));
         Ok(v)
     }
 
-    fn load(dev: &Path) -> Result<Partition> {
+    fn load(dev: &Path) -> Result<Self> {
         let is_mounted = is_in_use(dev)?;
-        let header = Partition::load_header(dev)?;
+        let header = Self::load_header(dev)?;
         Ok(Partition::new(dev, header, is_mounted))
     }
 
@@ -55,7 +55,7 @@ impl Partition {
         }))
     }
 
-    fn new(path: &Path, hinfo: Option<HeaderInfo>, is_mounted: bool) -> Partition {
+    fn new(path: &Path, hinfo: Option<HeaderInfo>, is_mounted: bool) -> Self {
         Partition {
             path: path.to_owned(), 
             hinfo, is_mounted,

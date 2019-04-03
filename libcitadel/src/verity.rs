@@ -125,7 +125,7 @@ pub struct VerityOutput {
 impl VerityOutput {
     /// Parse the string `output` as standard output from the dm-verity
     /// `veritysetup format` command.
-    fn parse(output: &str) -> VerityOutput {
+    fn parse(output: &str) -> Self {
         let mut vo = VerityOutput {
             output: output.to_owned(),
             map: HashMap::new(),

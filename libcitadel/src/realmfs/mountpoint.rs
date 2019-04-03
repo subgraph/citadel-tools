@@ -79,7 +79,7 @@ impl Mountpoint {
     fn field(&self, n: usize) -> &str {
         Self::filename_fields(self.path())
             .and_then(|mut fields| fields.nth(n))
-            .expect(&format!("Failed to access field {} of mountpoint {}", n, self))
+            .unwrap_or_else(|| panic!("Failed to access field {} of mountpoint {}", n, self))
     }
 
     /// Return `true` if this instance is a `&Path` in `RealmFS::RUN_DIRECTORY` and
@@ -90,11 +90,11 @@ impl Mountpoint {
     }
 
     fn has_valid_extention(&self) -> bool {
-        self.path().extension().map(|e| e == "mountpoint").unwrap_or(false)
+        self.path().extension().map_or(false, |e| e == "mountpoint")
     }
 
     fn filename_fields(path: &Path) -> Option<impl Iterator<Item=&str>> {
-        Self::filename(path).map(|name| name.split("-"))
+        Self::filename(path).map(|name| name.split('-'))
     }
 
     fn filename(path: &Path) -> Option<&str> {

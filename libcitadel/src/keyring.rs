@@ -29,14 +29,14 @@ pub struct KeyRing {
 }
 
 impl KeyRing {
-    pub fn create_new() -> KeyRing {
-        let seed = KeyRing::new_random_seed();
+    pub fn create_new() -> Self {
+        let seed = Self::new_random_seed();
         let mut keypairs = HashMap::new();
         keypairs.insert("realmfs-user".to_string(), hex::encode(&seed.0));
         KeyRing { keypairs }
     }
 
-    pub fn load<P: AsRef<Path>>(path: P, passphrase: &str) -> Result<KeyRing> {
+    pub fn load<P: AsRef<Path>>(path: P, passphrase: &str) -> Result<Self> {
         let mut sbox = SecretBox::new(path.as_ref());
         sbox.read().map_err(|e| format_err!("Error reading keyring file: {}", e))?;
         let mut bytes = sbox.open(passphrase)?;
@@ -45,13 +45,13 @@ impl KeyRing {
         Ok(keyring)
     }
 
-    pub fn load_with_cryptsetup_passphrase<P: AsRef<Path>>(path: P) -> Result<KeyRing> {
-        let passphrase = KeyRing::get_cryptsetup_passphrase()?;
-        KeyRing::load(path, &passphrase)
+    pub fn load_with_cryptsetup_passphrase<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let passphrase = Self::get_cryptsetup_passphrase()?;
+        Self::load(path, &passphrase)
     }
 
     fn get_cryptsetup_passphrase() -> Result<String> {
-        let key = KeyRing::get_key("cryptsetup")?;
+        let key = Self::get_key("cryptsetup")?;
         info!("Got key {}", key.0);
         let buf = key.read()?;
         match buf.split(|b| *b == 0).map(|bs| String::from_utf8_lossy(bs).to_string()).last() {
@@ -73,7 +73,7 @@ impl KeyRing {
             info!("Found {} key with request_key", name);
             return Ok(key);
         }
-        return Err(format_err!("kernel key '{}' not found", name))
+        Err(format_err!("kernel key '{}' not found", name))
     }
 
     pub fn add_keys_to_kernel(&self) -> Result<()> {
@@ -81,13 +81,13 @@ impl KeyRing {
             info!("Adding {} to kernel keystore", k.as_str());
             let bytes = hex::decode(v)?;
             let key = KernelKey::add_key("user", k.as_str(), &bytes, KEY_SPEC_USER_KEYRING)?;
-            key.set_perm(0x3f030000)?;
+            key.set_perm(0x3f03_0000)?;
         }
         Ok(())
     }
 
     pub fn get_kernel_keypair(name: &str) -> Result<KeyPair> {
-        let key = KeyRing::get_key(name)?;
+        let key = Self::get_key(name)?;
         let data = key.read()?;
         KeyPair::from_bytes(&data)
     }
@@ -130,7 +130,7 @@ struct SecretBox {
 }
 
 impl SecretBox {
-    fn new(path: &Path) -> SecretBox {
+    fn new(path: &Path) -> Self {
         SecretBox {
             path: path.to_path_buf(),
             salt: Salt([0; SALTBYTES]),
@@ -151,7 +151,7 @@ impl SecretBox {
     }
 
     fn open(&self, passphrase: &str) -> Result<Vec<u8>> {
-        let key = SecretBox::passphrase_to_key(passphrase, &self.salt)?;
+        let key = Self::passphrase_to_key(passphrase, &self.salt)?;
         let result = secretbox::open(&self.data, &self.nonce, &key)
             .map_err(|_| format_err!("Failed to decrypt {}", self.path.display()))?;
         Ok(result)
@@ -180,31 +180,31 @@ pub struct KernelKey(int32_t);
 
 impl KernelKey {
 
-    pub fn user_keyring() -> KernelKey {
+    pub fn user_keyring() -> Self {
         KernelKey(KEY_SPEC_USER_KEYRING)
     }
 
-    pub fn request_key(key_type: &str, description: &str) -> Result<KernelKey> {
+    pub fn request_key(key_type: &str, description: &str) -> Result<Self> {
         let key_type = CString::new(key_type).unwrap();
         let description = CString::new(description).unwrap();
         let serial = _request_key(key_type.as_ptr(), description.as_ptr())?;
         Ok(KernelKey(serial as i32))
     }
 
-    pub fn add_key(key_type: &str, description: &str, payload: &[u8], ring_id: c_int) -> Result<KernelKey> {
+    pub fn add_key(key_type: &str, description: &str, payload: &[u8], ring_id: c_int) -> Result<Self> {
         let key_type = CString::new(key_type).unwrap();
         let description = CString::new(description).unwrap();
         let serial = _add_key(key_type.as_ptr(), description.as_ptr(), payload.as_ptr(), payload.len(), ring_id)?;
         Ok(KernelKey(serial as i32))
     }
 
-    pub fn get_keyring_id(&self, create: bool) -> Result<KernelKey> {
+    pub fn get_keyring_id(&self, create: bool) -> Result<Self> {
         let serial = keyctl2(KEYCTL_GET_KEYRING_ID, self.id(), create as u64)?;
         Ok(KernelKey(serial as i32))
     }
 
     pub fn set_perm(&self, perm: u32) -> Result<()> {
-        keyctl2(KEYCTL_SETPERM, self.id(), perm as u64)?;
+        keyctl2(KEYCTL_SETPERM, self.id(), u64::from(perm))?;
         Ok(())
     }
 
@@ -219,7 +219,7 @@ impl KernelKey {
         }
     }
 
-    pub fn search(&self, description: &str) -> Result<KernelKey> {
+    pub fn search(&self, description: &str) -> Result<Self> {
         let key_type = CString::new("user").unwrap();
         let description = CString::new(description).unwrap();
 

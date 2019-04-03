@@ -570,7 +570,7 @@ impl<T: Display + Debug + 'static> View for TreeView<T> {
     }
 
     fn important_area(&self, size: Vec2) -> Rect {
-        self.row().map(|i| Rect::from_size((0,i), (size.x, 1))).unwrap_or(Rect::from((0,0)))
+        self.row().map(|i| Rect::from_size((0,i), (size.x, 1))).unwrap_or_else(|| Rect::from((0,0)))
 
     }
 }

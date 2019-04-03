@@ -156,9 +156,9 @@ impl <'a> RealmInfoRender <'a> {
 
         if self.realm.is_active() {
             self.print("  Running");
-            self.realm.leader_pid().map(|pid| {
+            if let Some(pid) = self.realm.leader_pid() {
                 self.print(format!(" (Leader pid: {})", pid));
-            });
+            }
         }
         self.newlines(2);
     }

@@ -111,24 +111,23 @@ impl BridgeAllocator {
     }
 
     fn new(bridge: &str, network: Ipv4Addr, mask_size: usize) -> BridgeAllocator {
-        let allocator = BridgeAllocator {
+        BridgeAllocator {
             bridge: bridge.to_owned(),
             allocated: HashSet::new(),
             allocations: HashMap::new(),
             network, mask_size,
-        };
-        allocator
+        }
     }
 
     pub fn allocate_address_for(&mut self, realm_name: &str) -> Result<String> {
         match self.find_free_address() {
             Some(addr) => {
-                self.allocated.insert(addr.clone());
-                if let Some(old) = self.allocations.insert(realm_name.to_owned(), addr.clone()) {
+                self.allocated.insert(addr);
+                if let Some(old) = self.allocations.insert(realm_name.to_owned(), addr) {
                     self.allocated.remove(&old);
                 }
                 self.write_state()?;
-                return Ok(format!("{}/{}", addr, self.mask_size));
+                Ok(format!("{}/{}", addr, self.mask_size))
             },
             None => bail!("No free IP address could be found to assign to {}", realm_name),
         }
@@ -136,7 +135,7 @@ impl BridgeAllocator {
     }
 
     fn store_allocation(&mut self, realm_name: &str, address: Ipv4Addr) -> Result<()> {
-        self.allocated.insert(address.clone());
+        self.allocated.insert(address);
         if let Some(old) = self.allocations.insert(realm_name.to_string(), address) {
             self.allocated.remove(&old);
         }
@@ -169,7 +168,7 @@ impl BridgeAllocator {
         if octet < RESERVED_START {
             bail!("Not a reserved octet: {}", octet);
         }
-        let rsv = u32::from(self.network) | octet as u32;
+        let rsv = u32::from(self.network) | u32::from(octet);
         let addr = Ipv4Addr::from(rsv);
         let s = format!("{}/{}", addr, self.mask_size);
         if self.allocated.contains(&addr) {
@@ -211,11 +210,11 @@ impl BridgeAllocator {
     }
 
     fn parse_state_line(&mut self, line: &str) -> Result<()> {
-        match line.find(":") {
+        match line.find(':') {
             Some(idx) => {
                 let (name,addr) = line.split_at(idx);
                 let ip = addr[1..].parse::<Ipv4Addr>()?;
-                self.allocated.insert(ip.clone());
+                self.allocated.insert(ip);
                 self.allocations.insert(name.to_owned(), ip);
             },
             None => bail!("Could not parse line from network state file: {}", line),

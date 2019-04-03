@@ -89,7 +89,7 @@ fn choose_boot_partiton(scan: bool) -> Result<Partition> {
     for p in partitions {
         best = compare_boot_partitions(best, p);
     }
-    best.ok_or(format_err!("No partition found to boot from"))
+    best.ok_or_else(|| format_err!("No partition found to boot from"))
 }
 
 fn compare_boot_partitions(a: Option<Partition>, b: Partition) -> Option<Partition> {

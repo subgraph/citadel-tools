@@ -68,24 +68,24 @@ impl RealmFS {
     pub const USER_KEYNAME: &'static str = "realmfs-user";
 
     /// Locate a RealmFS image by name in the default location using the standard name convention
-    pub fn load_by_name(name: &str) -> Result<RealmFS> {
-        RealmFS::validate_name(name)?;
-        let path = RealmFS::image_path(name);
+    pub fn load_by_name(name: &str) -> Result<Self> {
+        Self::validate_name(name)?;
+        let path = Self::image_path(name);
         if !path.exists() {
             bail!("No image found at {}", path.display());
         }
 
-        RealmFS::load_from_path(path)
+        Self::load_from_path(path)
     }
 
     /// Load RealmFS image from an exact path.
-    pub fn load_from_path(path: impl AsRef<Path>) -> Result<RealmFS> {
+    pub fn load_from_path(path: impl AsRef<Path>) -> Result<Self> {
         Self::_load_from_path(path.as_ref(), true)
     }
 
-    fn _load_from_path(path: &Path, load_activation: bool) -> Result<RealmFS> {
+    fn _load_from_path(path: &Path, load_activation: bool) -> Result<Self> {
         let path = Arc::new(path.to_owned());
-        let header = RealmFS::load_realmfs_header(&path)?;
+        let header = Self::load_realmfs_header(&path)?;
         let name = header.metainfo().realmfs_name()
             .expect("RealmFS does not have a name")
             .to_owned();
@@ -130,7 +130,7 @@ impl RealmFS {
     }
 
     pub fn is_valid_realmfs_image(path: impl AsRef<Path>) -> bool {
-        RealmFS::load_realmfs_header(path.as_ref()).is_ok()
+        Self::load_realmfs_header(path.as_ref()).is_ok()
     }
 
     fn load_realmfs_header(path: &Path) -> Result<ImageHeader> {
@@ -143,7 +143,7 @@ impl RealmFS {
             bail!("Image file {} is not a realmfs image", path.display());
         }
         match metainfo.realmfs_name() {
-            Some(name) => RealmFS::validate_name(name)?,
+            Some(name) => Self::validate_name(name)?,
             None => bail!("RealmFS image file {} does not have a 'realmfs-name' field", path.display()),
         };
         Ok(header)
@@ -151,7 +151,7 @@ impl RealmFS {
 
     /// Return an Error result if name is not valid.
     fn validate_name(name: &str) -> Result<()> {
-        if RealmFS::is_valid_name(name) {
+        if Self::is_valid_name(name) {
             Ok(())
         } else {
             Err(format_err!("Invalid realm name '{}'", name))
@@ -173,11 +173,11 @@ impl RealmFS {
         if !util::is_valid_name(name, MAX_REALMFS_NAME_LEN) {
             return false;
         }
-        RealmFS::is_valid_realmfs_image(RealmFS::image_path(name))
+        Self::is_valid_realmfs_image(Self::image_path(name))
     }
 
     fn image_path(name: &str) -> PathBuf {
-        Path::new(RealmFS::BASE_PATH).join(format!("{}-realmfs.img", name))
+        Path::new(Self::BASE_PATH).join(format!("{}-realmfs.img", name))
     }
 
     /// Return the `Path` to this RealmFS image file.
@@ -284,14 +284,14 @@ impl RealmFS {
         self.activation_state.deactivate(&active)
     }
 
-    pub fn fork(&self, new_name: &str) -> Result<RealmFS> {
+    pub fn fork(&self, new_name: &str) -> Result<Self> {
         self._fork(new_name, true)
     }
 
     /// Create an unsealed copy of this RealmFS image with a new image name.
     ///
-    pub fn fork_unsealed(&self, new_name: &str) -> Result<RealmFS> {
-        RealmFS::validate_name(new_name)?;
+    pub fn fork_unsealed(&self, new_name: &str) -> Result<Self> {
+        Self::validate_name(new_name)?;
         info!("forking RealmFS image '{}' to new name '{}'", self.name(), new_name);
 
         let new_path = self.path_with_filename(format!("{}-realmfs.img", new_name));
@@ -305,8 +305,8 @@ impl RealmFS {
         Ok(new_realmfs)
     }
 
-    fn _fork(&self, new_name: &str, sealed_fork: bool) -> Result<RealmFS> {
-        RealmFS::validate_name(new_name)?;
+    fn _fork(&self, new_name: &str, sealed_fork: bool) -> Result<Self> {
+        Self::validate_name(new_name)?;
         info!("forking RealmFS image '{}' to new name '{}'", self.name(), new_name);
         let new_path = self.path_with_filename(format!("{}-realmfs.img", new_name));
         if new_path.exists() {
@@ -328,18 +328,18 @@ impl RealmFS {
         self.path().extension() == Some(OsStr::new("update"))
     }
 
-    pub(crate) fn update_copy(&self) -> Result<RealmFS> {
+    pub(crate) fn update_copy(&self) -> Result<Self> {
         let path = self.path_with_extension("update");
         let name = self.name().to_string() + "-update";
         self.copy_image(&path, &name, false)
     }
 
-    fn copy_image(&self, path: &Path, name: &str, sealed_copy: bool) -> Result<RealmFS> {
+    fn copy_image(&self, path: &Path, name: &str, sealed_copy: bool) -> Result<Self> {
         if path.exists() {
             bail!("Cannot create sealed copy because target path '{}' already exists", path.display());
         }
         cmd!("/usr/bin/cp", "--reflink=auto {} {}", self.path.display(), path.display())?;
-        let mut realmfs = RealmFS::_load_from_path(path, false)?;
+        let mut realmfs = Self::_load_from_path(path, false)?;
         self.with_manager(|m| realmfs.set_manager(m));
         realmfs.name = Arc::new(name.to_owned());
 
@@ -365,13 +365,13 @@ impl RealmFS {
         let metainfo = self.metainfo();
         let metainfo_bytes = self.generate_sealed_metainfo(self.name(), metainfo.verity_salt(), metainfo.verity_root());
         let sig = keys.sign(&metainfo_bytes);
-        self.write_new_metainfo(metainfo_bytes, Some(sig))
+        self.write_new_metainfo(&metainfo_bytes, Some(sig))
     }
 
     /// Convert to unsealed RealmFS image by removing dm-verity metadata and hash tree
     pub fn unseal(&self) -> Result<()> {
-        let bytes = RealmFS::generate_unsealed_metainfo(self.name(), self.metainfo().nblocks(), None);
-        self.write_new_metainfo(bytes, None)?;
+        let bytes = Self::generate_unsealed_metainfo(self.name(), self.metainfo().nblocks(), None);
+        self.write_new_metainfo(&bytes, None)?;
         if self.has_verity_tree() {
             self.truncate_verity()?;
         }
@@ -384,7 +384,7 @@ impl RealmFS {
         }
         if let Some(activation) = self.activation() {
             let rw_mountpoint = activation.mountpoint_rw()
-                .ok_or(format_err!("unsealed activation expected"))?;
+                .ok_or_else(|| format_err!("unsealed activation expected"))?;
             if self.manager().active_mountpoints().contains(rw_mountpoint) {
                 bail!("Cannot set owner realm because RW mountpoint is in use (by current owner?)");
             }
@@ -397,12 +397,12 @@ impl RealmFS {
         if self.is_sealed() {
             bail!("Cannot update metainfo on sealed realmfs image");
         }
-        let metainfo_bytes = RealmFS::generate_unsealed_metainfo(name, nblocks, owner_realm);
-        self.write_new_metainfo(metainfo_bytes, None)
+        let metainfo_bytes = Self::generate_unsealed_metainfo(name, nblocks, owner_realm);
+        self.write_new_metainfo(&metainfo_bytes, None)
     }
 
-    fn write_new_metainfo(&self, bytes: Vec<u8>, sig: Option<Signature>) -> Result<()> {
-        self.header.set_metainfo_bytes(&bytes)?;
+    fn write_new_metainfo(&self, bytes: &[u8], sig: Option<Signature>) -> Result<()> {
+        self.header.set_metainfo_bytes(bytes)?;
         if let Some(sig) = sig {
             self.header.set_signature(sig.to_bytes())?;
         }
@@ -421,7 +421,7 @@ impl RealmFS {
     }
 
     fn generate_sealed_metainfo(&self, name: &str, verity_salt: &str, verity_root: &str) -> Vec<u8> {
-        let mut v = RealmFS::generate_unsealed_metainfo(name, self.metainfo().nblocks(), None);
+        let mut v = Self::generate_unsealed_metainfo(name, self.metainfo().nblocks(), None);
         writeln!(v, "channel = \"{}\"", Self::USER_KEYNAME).unwrap();
         writeln!(v, "verity-salt = \"{}\"", verity_salt).unwrap();
         writeln!(v, "verity-root = \"{}\"", verity_root).unwrap();
@@ -499,7 +499,7 @@ impl RealmFS {
 
         let name = new_name.unwrap_or_else(|| self.name());
 
-        let mut realmfs = RealmFS::load_from_path(&tmp)?;
+        let mut realmfs = Self::load_from_path(&tmp)?;
         realmfs.set_manager(self.manager());
 
         let finish = || {
@@ -525,7 +525,7 @@ impl RealmFS {
         let salt = hex::encode(randombytes(32));
         let output = Verity::new(self.path()).generate_image_hashtree_with_salt(&self.metainfo(), &salt)?;
         let root_hash = output.root_hash()
-            .ok_or(format_err!("no root hash returned from verity format operation"))?;
+            .ok_or_else(|| format_err!("no root hash returned from verity format operation"))?;
         info!("root hash is {}", output.root_hash().unwrap());
 
         info!("Signing new image with user realmfs keys");
@@ -533,7 +533,7 @@ impl RealmFS {
         let sig = keys.sign(&metainfo_bytes);
 
         self.header().set_flag(ImageHeader::FLAG_HASH_TREE);
-        self.write_new_metainfo(metainfo_bytes, Some(sig))
+        self.write_new_metainfo(&metainfo_bytes, Some(sig))
     }
 
     pub fn has_sealing_keys(&self) -> bool {
@@ -545,7 +545,7 @@ impl RealmFS {
     }
 
     pub fn rotate(&self, new_file: &Path) -> Result<()> {
-       let backup = |n: usize| Path::new(RealmFS::BASE_PATH).join(format!("{}-realmfs.img.{}", self.name(), n));
+       let backup = |n: usize| Path::new(Self::BASE_PATH).join(format!("{}-realmfs.img.{}", self.name(), n));
 
         for i in (1..NUM_BACKUPS).rev() {
             let from = backup(i - 1);
@@ -590,8 +590,7 @@ impl RealmFS {
     /// this `RealmFS`
     pub fn release_mountpoint(&self, mountpoint: &Mountpoint)  -> bool {
         let is_ours = self.activation()
-            .map(|a| a.is_mountpoint(mountpoint))
-            .unwrap_or(false);
+            .map_or(false, |a| a.is_mountpoint(mountpoint));
 
         if is_ours {
             if let Err(e) = self.deactivate() {

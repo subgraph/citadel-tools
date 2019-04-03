@@ -490,7 +490,7 @@ impl Installer {
 
     fn kernel_imagename(&self) -> String {
         let utsname = UtsName::uname();
-        let v = utsname.release().split("-").collect::<Vec<_>>();
+        let v = utsname.release().split('-').collect::<Vec<_>>();
         format!("citadel-kernel-{}.img", v[0])
     }
 

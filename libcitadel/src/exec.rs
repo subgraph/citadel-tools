@@ -30,7 +30,7 @@ pub struct Exec {
 }
 
 impl Exec {
-    pub fn new(cmd: impl AsRef<str>) -> Exec {
+    pub fn new(cmd: impl AsRef<str>) -> Self {
         Exec {
             cmd_name: cmd.as_ref().to_string(),
             cmd: Command::new(cmd.as_ref()),
@@ -55,7 +55,7 @@ impl Exec {
         for line in BufReader::new(result.stderr.as_slice()).lines() {
             verbose!("  {}", line?);
         }
-        self.check_cmd_status(&result.status)
+        self.check_cmd_status(result.status)
     }
 
 
@@ -73,7 +73,7 @@ impl Exec {
         self.ensure_command_exists()?;
         self.add_args(args.as_ref());
         let result = self.cmd.stderr(Stdio::inherit()).output()?;
-        self.check_cmd_status(&result.status)?;
+        self.check_cmd_status(result.status)?;
         Ok(String::from_utf8(result.stdout).unwrap().trim().to_owned())
     }
 
@@ -103,7 +103,7 @@ impl Exec {
         self.cmd.args(args);
     }
 
-    fn check_cmd_status(&self, status: &ExitStatus) -> Result<()> {
+    fn check_cmd_status(&self, status: ExitStatus) -> Result<()> {
         if !status.success() {
             match status.code() {
                 Some(code) => bail!("command {} failed with exit code: {}", self.cmd_name, code),
@@ -116,7 +116,7 @@ impl Exec {
     fn ensure_command_exists(&self) -> Result<()> {
         let path = Path::new(&self.cmd_name);
         if !path.is_absolute() {
-            Exec::search_path(&self.cmd_name)?;
+            Self::search_path(&self.cmd_name)?;
             return Ok(())
         } else if path.exists() {
             return Ok(())
@@ -148,13 +148,13 @@ fn ranged_reader<P: AsRef<Path>>(path: P, range: FileRange) -> Result<Box<dyn Re
     let offset = match range {
         FileRange::All => 0,
         FileRange::Offset(n) => n,
-        FileRange::Range {offset, len: _} => offset,
+        FileRange::Range {offset, ..} => offset,
     };
     if offset > 0 {
         f.seek(SeekFrom::Start(offset as u64))?;
     }
     let r = BufReader::new(f);
-    if let FileRange::Range {offset: _, len} = range {
+    if let FileRange::Range {len, ..} = range {
         Ok(Box::new(r.take(len as u64)))
     } else {
         Ok(Box::new(r))

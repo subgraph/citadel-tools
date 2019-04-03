@@ -7,6 +7,7 @@ use std::thread::{self,JoinHandle};
 use std::path;
 
 use crate::{RealmManager, Result, Realm};
+use super::realms::HasCurrentChanged;
 use dbus::{Connection, BusType, ConnectionItem, Message, Path};
 use inotify::{Inotify, WatchMask, WatchDescriptor, Event};
 
@@ -54,8 +55,8 @@ impl Inner {
         }
     }
 
-    fn set_manager(&mut self, manager: Arc<RealmManager>) {
-        self.manager = Arc::downgrade(&manager);
+    fn set_manager(&mut self, manager: &Arc<RealmManager>) {
+        self.manager = Arc::downgrade(manager);
     }
 
     pub fn add_handler<F>(&mut self, handler: F)
@@ -96,7 +97,7 @@ impl RealmEventListener {
         }
     }
 
-    pub fn set_manager(&self, manager: Arc<RealmManager>) {
+    pub fn set_manager(&self, manager: &Arc<RealmManager>) {
         self.inner_mut().set_manager(manager);
     }
 
@@ -242,7 +243,7 @@ impl DbusEventListener {
     fn handle_signal(&self, message: Message) -> Result<()> {
 
         let member = message.member()
-            .ok_or(format_err!("invalid signal"))?;
+            .ok_or_else(|| format_err!("invalid signal"))?;
         let (name, _path): (String, Path) = message.read2()?;
         if let (Some(interface),Some(member)) = (message.interface(),message.member()) {
             verbose!("DBUS: {}:[{}({})]", interface, member,name);
@@ -343,7 +344,7 @@ impl InotifyEventListener {
 
     fn handle_current_event(&self) {
         self.inner().with_manager(|m| {
-            if let Some(current) = m.has_current_changed() {
+            if let HasCurrentChanged::Changed(current) = m.has_current_changed() {
                 self.inner().send_event(RealmEvent::Current(current));
             }
         })

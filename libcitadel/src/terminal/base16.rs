@@ -1,4 +1,4 @@
-
+#![allow(clippy::unreadable_literal)]
 use std::collections::HashMap;
 use crate::terminal::{Color, Base16Shell};
 use crate::{Realm, Result, util, RealmManager};
@@ -24,7 +24,7 @@ impl Base16Scheme {
     const BASE16_SHELL_FILE: &'static str = ".base16rc";
     const BASE16_VIM_FILE: &'static str = ".base16vim";
 
-    pub fn by_name(name: &str) -> Option<&'static Base16Scheme> {
+    pub fn by_name(name: &str) -> Option<&'static Self> {
         SCHEMES.get(name)
     }
 
@@ -34,8 +34,8 @@ impl Base16Scheme {
         v
     }
 
-    pub fn all_schemes() -> Vec<Base16Scheme> {
-        let mut v: Vec<Base16Scheme> =
+    pub fn all_schemes() -> Vec<Self> {
+        let mut v: Vec<Self> =
             SCHEMES.values().cloned().collect();
 
         v.sort_by(|a,b| a.name().cmp(b.name()));
@@ -70,12 +70,12 @@ impl Base16Scheme {
         None
     }
 
-    pub fn new(slug: &str, name: &str, v: Vec<u32>) -> Base16Scheme {
+    pub fn new(slug: &str, name: &str, v: Vec<u32>) -> Self {
         assert_eq!(v.len(), 16);
         let mut colors = [Color::default();16];
-        let cs = v.iter().map(|&c| Base16Scheme::u32_to_color(c)).collect::<Vec<_>>();
+        let cs = v.iter().map(|&c| Self::u32_to_color(c)).collect::<Vec<_>>();
         colors.copy_from_slice(&cs);
-        let category = Base16Scheme::find_category(name);
+        let category = Self::find_category(name);
         Base16Scheme {
             name: name.to_string(),
             slug: slug.to_string(),
@@ -110,7 +110,7 @@ impl Base16Scheme {
     }
 
     pub fn terminal_palette_color(&self, idx: usize) -> Color {
-        self.color(Base16Scheme::TERM_MAP[idx])
+        self.color(Self::TERM_MAP[idx])
     }
 
     pub fn apply_to_realm(&self, manager: &RealmManager, realm: &Realm) -> Result<()> {
@@ -925,7 +925,7 @@ fn create_schemes() -> HashMap<String, Base16Scheme> {
     vec![
         0x1B2B34, 0x343D46, 0x4F5B66, 0x65737E,
         0xA7ADBA, 0xC0C5CE, 0xCDD3DE, 0xD8DEE9,
-        0xEC5f67, 0xF99157, 0xFAC863, 0x99C794,
+        0xEC5F67, 0xF99157, 0xFAC863, 0x99C794,
         0x5FB3B3, 0x6699CC, 0xC594C5, 0xAB7967,
     ]));
 
@@ -1029,7 +1029,7 @@ fn create_schemes() -> HashMap<String, Base16Scheme> {
     vec![
         0x151718, 0x282a2b, 0x3B758C, 0x41535B,
         0x43a5d5, 0xd6d6d6, 0xeeeeee, 0xffffff,
-        0xCd3f45, 0xdb7b55, 0xe6cd69, 0x9fca56,
+        0xcd3f45, 0xdb7b55, 0xe6cd69, 0x9fca56,
         0x55dbbe, 0x55b5db, 0xa074c4, 0x8a553f,
     ]));
 

@@ -7,7 +7,7 @@ use crate::Result;
 pub fn read(path: impl AsRef<Path>) -> Option<PathBuf> {
     let path = path.as_ref();
 
-    if !fs::symlink_metadata(path).is_ok() {
+    if fs::symlink_metadata(path).is_err() {
         return None;
     }
 
@@ -44,8 +44,8 @@ pub fn write(target: impl AsRef<Path>, link: impl AsRef<Path>, tmp_in_parent: bo
 }
 
 fn write_tmp_path(link: &Path, tmp_in_parent: bool) -> PathBuf {
-    let skip = if tmp_in_parent { 2 } else { 1 };
-    let tmp_dir = link.ancestors().skip(skip).next()
+    let n = if tmp_in_parent { 2 } else { 1 };
+    let tmp_dir = link.ancestors().nth(n)
         .expect("No parent directory in write_symlink");
 
     let mut tmp_fname = link.file_name()

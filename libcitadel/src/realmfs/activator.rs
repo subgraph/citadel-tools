@@ -6,10 +6,10 @@ use crate::realmfs::mountpoint::Mountpoint;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use crate::verity::Verity;
 
-/// Holds the activation status for a RealmFS and provides a thread-safe
+/// Holds the activation status for a `RealmFS` and provides a thread-safe
 /// interface to it.
 ///
-/// If `state` is `None` then the RealmFS is not currently activated.
+/// If `state` is `None` then the `RealmFS` is not currently activated.
 ///
 pub struct ActivationState {
     state: RwLock<Option<Arc<Activation>>>,
@@ -33,7 +33,7 @@ impl ActivationState {
             let activator = LoopActivator::new(realmfs);
             activator.activation()
         };
-        *self.state_mut() = activation.map(|a| Arc::new(a))
+        *self.state_mut() = activation.map(Arc::new)
     }
 
     /// If currently activated return the corresponding `Activation` instance
@@ -103,10 +103,10 @@ impl ActivationState {
     }
 }
 
-/// Represents a RealmFS in an activated state. The activation can be one of:
+/// Represents a `RealmFS` in an activated state. The activation can be one of:
 ///
-///   `Activation::Loop`   if the RealmFS is unsealed
-///   `Activation::Verity` if the RealmFS is sealed
+///   `Activation::Loop`   if the `RealmFS` is unsealed
+///   `Activation::Verity` if the `RealmFS` is sealed
 ///
 #[derive(Debug)]
 pub enum Activation {
@@ -149,12 +149,12 @@ impl Activation {
         if mountpoint.tag() == "rw" || mountpoint.tag() == "ro" {
             LoopDevice::find_mounted_loop(mountpoint.path()).map(|loopdev| {
                 let (ro,rw) = Mountpoint::new_loop_pair(mountpoint.realmfs());
-                Activation::new_loop(ro, rw, loopdev)
+                Self::new_loop(ro, rw, loopdev)
             })
         } else {
             let device = Verity::device_name_for_mountpoint(mountpoint);
             if Path::new("/dev/mapper").join(&device).exists() {
-                Some(Activation::new_verity(mountpoint.clone(), device))
+                Some(Self::new_verity(mountpoint.clone(), device))
             } else {
                 None
             }

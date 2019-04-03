@@ -227,7 +227,7 @@ impl <'a> RealmFSInfoRender <'a> {
 
         self.print("   Device : ")
             .dim_style()
-            .println(format!("{}", activation.device()))
+            .println(activation.device())
             .pop();
 
         let mount = if activation.mountpoint_rw().is_some() { "Mounts" } else { "Mount "};

@@ -13,7 +13,7 @@ const BLOCKS_PER_GIG: usize = 1024 * BLOCKS_PER_MEG;
 const RESIZE2FS: &str = "resize2fs";
 
 // If less than 1gb remaining space
-const AUTO_RESIZE_MINIMUM_FREE: ResizeSize = ResizeSize(1 * BLOCKS_PER_GIG);
+const AUTO_RESIZE_MINIMUM_FREE: ResizeSize = ResizeSize(BLOCKS_PER_GIG);
 // ... add 4gb to size of image
 const AUTO_RESIZE_INCREASE_SIZE: ResizeSize = ResizeSize(4 * BLOCKS_PER_GIG);
 
@@ -21,19 +21,20 @@ pub struct ImageResizer<'a> {
     image: &'a RealmFS,
 }
 
+#[derive(Copy,Clone)]
 pub struct ResizeSize(usize);
 
 impl ResizeSize {
 
-    pub fn gigs(n: usize) -> ResizeSize {
+    pub fn gigs(n: usize) -> Self {
         ResizeSize(BLOCKS_PER_GIG * n)
 
     }
-    pub fn megs(n: usize) -> ResizeSize {
+    pub fn megs(n: usize) -> Self {
         ResizeSize(BLOCKS_PER_MEG * n)
     }
 
-    pub fn blocks(n: usize) -> ResizeSize {
+    pub fn blocks(n: usize) -> Self {
         ResizeSize(n)
     }
 
@@ -150,13 +151,14 @@ impl <'a> ImageResizer<'a> {
 
 const SUPERBLOCK_SIZE: usize = 1024;
 pub struct Superblock([u8; SUPERBLOCK_SIZE]);
+
 impl Superblock {
-    fn new() -> Superblock {
+    fn new() -> Self {
         Superblock([0u8; SUPERBLOCK_SIZE])
     }
 
-    pub fn load(path: impl AsRef<Path>, offset: u64) -> Result<Superblock> {
-        let mut sb = Superblock::new();
+    pub fn load(path: impl AsRef<Path>, offset: u64) -> Result<Self> {
+        let mut sb = Self::new();
         let mut file = File::open(path.as_ref())?;
         file.seek(SeekFrom::Start(1024 + offset))?;
         file.read_exact(&mut sb.0)?;
@@ -172,8 +174,8 @@ impl Superblock {
     }
 
     fn split_u64(&self, offset_lo: usize, offset_hi: usize) -> u64 {
-        let lo = self.u32(offset_lo) as u64;
-        let hi = self.u32(offset_hi) as u64;
+        let lo = u64::from(self.u32(offset_lo));
+        let hi = u64::from(self.u32(offset_hi));
         (hi << 32) | lo
     }
 

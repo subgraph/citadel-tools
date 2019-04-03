@@ -15,9 +15,8 @@ pub fn main(args: Vec<String>) {
         Logger::set_log_level(LogLevel::Info);
     }
 
-    let command = args.iter().skip(1).next();
 
-    let result = match command {
+    let result = match args.get(1) {
         Some(s) if s == "rootfs" => do_rootfs(),
         Some(s) if s == "setup" => do_setup(),
         Some(s) if s == "start-realms" => do_start_realms(),
@@ -48,10 +47,8 @@ fn setup_keyring() -> Result<()> {
 fn do_setup() -> Result<()> {
     if CommandLine::live_mode() || CommandLine::install_mode() {
         live::live_setup()?;
-    } else {
-        if let Err(err) = setup_keyring() {
-            warn!("Failed to setup keyring: {}", err);
-        }
+    } else if let Err(err) = setup_keyring() {
+        warn!("Failed to setup keyring: {}", err);
     }
 
     ResourceImage::mount_image_type("kernel")?;

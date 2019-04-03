@@ -21,14 +21,15 @@ impl RealmFSSet {
     fn load_all() -> Result<Vec<RealmFS>> {
         let mut v = Vec::new();
         for entry in fs::read_dir(RealmFS::BASE_PATH)? {
-            if let Some(realmfs) = Self::entry_to_realmfs(entry?) {
+            let entry = entry?;
+            if let Some(realmfs) = Self::entry_to_realmfs(&entry) {
                 v.push(realmfs)
             }
         }
         Ok(v)
     }
 
-    fn entry_to_realmfs(entry: fs::DirEntry) -> Option<RealmFS> {
+    fn entry_to_realmfs(entry: &fs::DirEntry) -> Option<RealmFS> {
         if let Ok(filename) = entry.file_name().into_string() {
             if filename.ends_with("-realmfs.img") {
                 let name = filename.trim_end_matches("-realmfs.img");
@@ -40,7 +41,7 @@ impl RealmFSSet {
         None
     }
 
-    pub fn set_manager(&mut self, manager: Arc<RealmManager>) {
+    pub fn set_manager(&mut self, manager: &Arc<RealmManager>) {
         self.realmfs_map.iter_mut().for_each(|(_,v)| v.set_manager(manager.clone()))
     }
 

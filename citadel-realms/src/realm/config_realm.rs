@@ -153,7 +153,7 @@ impl ConfigDialog {
     fn call_id<V: View, F: FnOnce(&mut V) -> R, R>(&mut self, id: &str, callback: F) -> R
     {
         self.call_on_id(id, callback)
-            .expect(format!("failed call_on_id({})", id).as_str())
+            .unwrap_or_else(|| panic!("failed call_on_id({})", id))
     }
 
     pub fn reset_changes(&mut self) {
@@ -372,15 +372,13 @@ impl OptionEntry {
 
     fn load(&mut self, config: &mut RealmConfig) {
         let var = (self.accessor)(config);
-        self.value = var.clone();
-        self.original = var.clone();
+        self.value = *var;
+        self.original = *var;
         self.default = self.resolve_default(config);
     }
 
     fn set(&mut self, v: bool) {
-        if v != self.default {
-            self.value = Some(v);
-        } else if Some(v) == self.original {
+        if v != self.default || self.original == Some(v) {
             self.value = Some(v);
         } else {
             self.value = None;

@@ -169,7 +169,7 @@ impl RealmFSAction {
         EventResult::with_cb(|s| {
             let realmfs = Self::current_realmfs(s);
             let desc = format!("{}-realmfs.img", realmfs.name());
-            let notes = realmfs.notes().unwrap_or(String::new());
+            let notes = realmfs.notes().unwrap_or_default();
             NotesDialog::open(s, &desc, notes, move |s, notes| {
                 if let Err(e) = realmfs.save_notes(notes) {
                     warn!("error saving notes file for {}-realmfs.img: {}", realmfs.name(), e);

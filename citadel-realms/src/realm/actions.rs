@@ -79,10 +79,8 @@ impl RealmAction {
         let msg = "Open terminal in realm '$REALM'?";
         Self::confirm_action(title, msg, |r| {
             let manager = r.manager();
-            if !r.is_active() {
-                if !Self::log_fail("starting realm", || manager.start_realm(r)) {
-                    return;
-                }
+            if !r.is_active() && !Self::log_fail("starting realm", || manager.start_realm(r)) {
+                return;
             }
             Self::log_fail("starting terminal", || manager.launch_terminal(r));
         })
@@ -146,7 +144,7 @@ impl RealmAction {
         EventResult::with_cb(|s| {
             let realm = RealmAction::current_realm(s);
             let desc = format!("realm-{}", realm.name());
-            let notes = realm.notes().unwrap_or(String::new());
+            let notes = realm.notes().unwrap_or_default();
             NotesDialog::open(s, &desc, notes, move |s, notes| {
                 if let Err(e) = realm.save_notes(notes) {
                     warn!("error saving notes file for realm-{}: {}", realm.name(), e);

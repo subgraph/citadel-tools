@@ -2,11 +2,11 @@ use libcitadel::{Result, Logger, LogLevel};
 
 mod desktop_file;
 mod parser;
-mod sync;
+mod desktop_sync;
 mod icons;
 mod icon_cache;
 
-use self::sync::DesktopFileSync;
+use self::desktop_sync::DesktopFileSync;
 
 pub fn main(args: Vec<String>) {
 

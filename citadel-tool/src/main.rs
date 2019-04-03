@@ -48,7 +48,7 @@ fn main() {
 }
 
 fn dispatch_command(args: Vec<String>) {
-    if let Some(command) = args.iter().skip(1).next() {
+    if let Some(command) = args.get(1) {
         match command.as_str() {
             "boot" => boot::main(rebuild_args("citadel-boot", args)),
             "install" => install::main(rebuild_args("citadel-install", args)),
