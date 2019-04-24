@@ -112,7 +112,7 @@ impl UpdateBuilder {
 
     fn prepend_empty_block(&mut self) -> Result<()> {
         let tmpfile = self.image().with_extension("tmp");
-        cmd!("/usr/bin/dd", "if={} of={} bs=4096 seek=1 conv=sparse", self.image().display(), tmpfile.display())?;
+        cmd!("/bin/dd", "if={} of={} bs=4096 seek=1 conv=sparse", self.image().display(), tmpfile.display())?;
         fs::rename(tmpfile, self.image())?;
         Ok(())
     }
